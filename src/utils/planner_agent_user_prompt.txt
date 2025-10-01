@@ -1,0 +1,11 @@
+The task is <TASK_DESCRIPTION>
+You must use only the following actions for the plan and nothing else: 
+- NAVIGATE : to move in the scene towards a point far from you, for example 'NAVIGATE to the table'
+- GRAB : for the action of grabbing an object and specifying which object to grab during this action. The object is grabbed by the gripper and cannot be manipulated by the human. You can only grab one object at the time. For example 'GRAB bottle'
+- DROP : for the action of placing an object, specifying where with respect to another object, for example 'DROP bottle left to mug' or 'DROP mug right to bottle' or 'DROP pen into bag'
+- ROTATE_LEFT: for the action of rotating the gripper by 90° to the left, for example 'ROTATE_LEFT gripper with bottle'.
+- ROTATE_RIGHT: for the action of rotating the gripper by 90° to the right, for example 'ROTATE_RIGHT gripper with bottle'.
+
+In addition to the previous actions, you have a special action that you can use if you think that you cannot do it by yourself and you need external assistaance by an human. 
+- HUMAN [the action that need to be executed by an human], for example : HUMAN {do this action for me}
+Write only the actions for the plan and nothing else

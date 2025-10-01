@@ -1,4 +1,3 @@
-
 import rospy
 import open3d as o3d
 import os
@@ -18,8 +17,6 @@ import tf2_py as tf2
 import pickle
 import actionlib
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-
-move_base_publisher = rospy.Publisher('/mobile_base_controller/cmd_vel')
 
 # GRABBING_QUATERNION =  Quaternion(-0.528,0.412,0.473,0.571)
 GRABBING_QUATERNION = Quaternion(-0.742818371853,-0.0634568007104,0.0418472405416,0.665163821431)
@@ -58,7 +55,7 @@ def back_init():
 
     init = list(np.array([11, -77, -11, 111, -90, 78, 0])*np.pi/180)
     new_wp1 = list(np.array([42, 16, -109, 105, -60, -56, -108])*np.pi/180)
-    new_wp1 = [0.35]+new_wp1
+    new_wp1 = [0.05]+new_wp1
 
     arm_group.go(new_wp1, wait=True)
     arm_group.stop()
@@ -77,7 +74,7 @@ def home():
 
     # Move arm to the initial position
     init_pos = [0, 0, 0, 0, 0, 0, 0, 0]
-    init_pos[0] = 0.35 #torso height
+    init_pos[0] = 0.05 #torso height
     init_pos[1:] = [0.2, -1.34, -0.2, 1.94, -1.57, 1.37, 0.0] # arms
 
     move_group.go(init_pos, wait=True)
@@ -148,20 +145,9 @@ def push(group, gripper, goal_pose):
         rospy.signal_shutdown("Action server not available!")
     pass
 
-def navigate(group, gripper, goal_pose):
-    init_pose = group.get_current_pose().pose
-    current_orientation = init_pose.orientation
+def navigate(group, gripper, goal):
     client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
     client.wait_for_server()
-
-    goal = MoveBaseGoal()
-    goal.target_pose.header.frame_id = "map"
-    goal.target_pose.header.stamp = rospy.Time.now()
-    goal.target_pose.pose.position.x = goal_pose.position.x-0.3
-    goal.target_pose.pose.position.y = goal_pose.position.y-0.3
-    goal.target_pose.pose.position.z = goal_pose.position.z
-    goal.target_pose.pose.orientation = current_orientation
-
     client.send_goal(goal)
     wait = client.wait_for_result()
     if not wait:
@@ -204,3 +190,4 @@ def pull(group, gripper, goal_pose):
     if not wait:
         rospy.logerr("Action server not available!")
         rospy.signal_shutdown("Action server not available!")
+

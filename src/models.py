@@ -1,17 +1,71 @@
 
 
 import torch
-from mmengine.config import Config
-from mmengine.dataset import Compose
-from mmengine.runner import Runner
-from mmengine.runner.amp import autocast
-from torchvision.ops import nms
 import numpy as np
 import cv2
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from efficientvit.export_encoder import SamResize
 from efficientvit.inference import SamDecoder, SamEncoder
+from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+from utils.config import YOLO_WORLD_PATH
+import cv2
+from PIL import Image
+
+class YoloWorld():
+    def __init__(self, model_id="IDEA-Research/grounding-dino-base"):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(self.device)
+        self.classes = None
+
+    def set_classes(self, classes):
+        # GroundingDINO expects "." at the end of each query
+        self.classes = [cls.lower().strip() + "." for cls in classes]
+
+    def predict(self, image, box_threshold=0.4, text_threshold=0.3):
+        if self.classes is None:
+            raise ValueError("Chiama set_classes prima di predict().")
+
+        # --- Convert np.ndarray → PIL ---
+        if isinstance(image, np.ndarray):
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image_rgb = Image.fromarray(image_rgb)
+        else:
+            image_rgb = image
+
+        text_queries = " ".join(self.classes)
+
+        # ✅ Important: pass `images=` and `text=` here
+        inputs = self.processor(images=image_rgb, text=text_queries, return_tensors="pt").to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        results = self.processor.post_process_grounded_object_detection(
+            outputs,
+            input_ids=inputs["input_ids"],
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
+            target_sizes=[image_rgb.size[::-1]]  # (height, width)
+        )[0]
+
+        bboxes, classes, confidences = [], [], []
+        for box, score, label_id in zip(results["boxes"], results["scores"], results["labels"]):
+            xmin, ymin, xmax, ymax = box.tolist()
+            bboxes.append([xmin, ymin, xmax, ymax])
+            classes.append(label_id)   # ← Already a string like "table"
+            confidences.append(float(score))
+        return bboxes, classes, confidences
+    
+    def get_image_with_bboxes(self, image, conf=0.4): 
+        bboxes, classes, confidences = self.predict(image, box_threshold=conf) 
+        for i in range(len(bboxes)):
+             if confidences[i] >= conf: 
+                x1, y1, x2, y2 = map(int, bboxes[i]) 
+                cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2) 
+                cv2.putText(image, f"{classes[i]} {confidences[i]:.2f}", (x1, max(0, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2) 
+        return image
 
 class VitSam():
 
@@ -49,61 +103,4 @@ class VitSam():
         x = F.pad(x, (0, tw - w, 0, th - h), value=0).unsqueeze(0).numpy()
 
         return x
-    
-    
 
-class YOLOW():
-
-    def __init__(self,YOLOW_PATH):
-        cfg = Config.fromfile(
-            YOLOW_PATH + "yolo_world_l_t2i_bn_2e-4_100e_4x8gpus_obj365v1_goldg_train_lvis_minival.py"
-        )
-        cfg.work_dir = YOLOW_PATH
-        cfg.load_from = YOLOW_PATH + "yolow.pth"
-        cfg.__setattr__("log_level","WARNING")
-        self.runner = Runner.from_cfg(cfg)
-        self.runner.call_hook("before_run")
-        self.runner.load_or_resume()
-        pipeline = cfg.test_dataloader.dataset.pipeline
-        self.runner.pipeline = Compose(pipeline)
-        self.runner.model.eval()
-
-    def set_class_name(self,objects):
-        self.class_names = (objects)
-        self.objects = objects.split(",")
-
-    def get_class_name(self, id):
-        return self.objects[id]
-
-    def __call__(self,input_image,max_num_boxes=100,score_thr=0.05,nms_thr=0.5):
-
-        texts = [[t.strip()] for t in self.class_names.split(",")] + [[" "]]
-        data_info = self.runner.pipeline(dict(img_id=0, img_path=input_image,
-                                        texts=texts))
-
-        data_batch = dict(
-            inputs=data_info["inputs"].unsqueeze(0),
-            data_samples=[data_info["data_samples"]],
-        )
-
-        with autocast(enabled=False), torch.no_grad():
-            output = self.runner.model.test_step(data_batch)[0]
-            self.runner.model.class_names = texts
-            pred_instances = output.pred_instances
-
-        keep_idxs = nms(pred_instances.bboxes, pred_instances.scores, iou_threshold=nms_thr)
-        pred_instances = pred_instances[keep_idxs]
-        pred_instances = pred_instances[pred_instances.scores.float() > score_thr]
-
-        if len(pred_instances.scores) > max_num_boxes:
-            indices = pred_instances.scores.float().topk(max_num_boxes)[1]
-            pred_instances = pred_instances[indices]
-        output.pred_instances = pred_instances
-
-        pred_instances = pred_instances.cpu().numpy()
-
-        xyxy=pred_instances['bboxes'],
-        class_id=pred_instances['labels'],
-        confidence=pred_instances['scores'] 
-
-        return xyxy, confidence, class_id
