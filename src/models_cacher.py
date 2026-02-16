@@ -35,5 +35,7 @@ if __name__ == '__main__':
                 print("Detection completed")
             else:
                 pass
-        except:
-            pass
+        except Exception as e:
+            print(f"ERROR: {e}")
+            import traceback
+            traceback.print_exc()

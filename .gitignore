@@ -161,3 +161,25 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+
+# ros_docker setup
+
+config/efficientvitsam/efficientvit_sam_l2.pt
+config/efficientvitsam/l2_decoder.onnx
+config/efficientvitsam/l2_encoder.onnx
+config/yolow/20260216_125034/
+config/yolow/20260216_130205/
+config/yolow/20260216_131243/
+config/yolow/20260216_131319/
+config/yolow/20260216_131623/
+config/yolow/20260216_133138/
+config/yolow/20260216_133455/
+config/yolow/20260216_133752/
+config/yolow/yolow.pth
+config/yolow/yolow1.pth
+devel/
+images/
+logs/
+output/
+rosbags/

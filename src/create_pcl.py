@@ -15,8 +15,15 @@ import os
 import time
 import tf2_ros
 import tf2_py as tf2
-from pal_interaction_msgs.msg import TtsAction, TtsGoal
-from actionlib import SimpleActionClient
+
+# Optional import for speech functionality
+try:
+    from pal_interaction_msgs.msg import TtsAction, TtsGoal
+    from actionlib import SimpleActionClient
+    PAL_MSGS_AVAILABLE = True
+except ImportError:
+    PAL_MSGS_AVAILABLE = False
+    print("Warning: pal_interaction_msgs not available. Speech functionality will be disabled.")
 
 from paths import IMAGES_DIR, OUTPUT_DIR
 
@@ -46,6 +53,9 @@ def depth_image_to_point_cloud(depth_image, camera_intrinsics):
     return points
 
 def say_phrase(phrase):
+    if not PAL_MSGS_AVAILABLE:
+        print(f"Speech disabled (pal_interaction_msgs not available): {phrase}")
+        return
     client = SimpleActionClient('/tts', TtsAction)
     client.wait_for_server()
     goal = TtsGoal()

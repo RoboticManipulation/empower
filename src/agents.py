@@ -9,7 +9,7 @@ class Agents:
     
     def single_agent(self):
             agent = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o-2024-11-20",
             messages=[
                 {
                 "role": "user",
@@ -64,7 +64,7 @@ class Agents:
     
         def enviroment_agent():
             agent = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o-2024-11-20",
             messages=[
                 {
                 "role": "user",
@@ -104,7 +104,7 @@ class Agents:
 
         def description_agent():
             agent = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o-2024-11-20",
             messages=[
                 {
                 "role": "user",
@@ -140,7 +140,7 @@ class Agents:
         description_agent_info = description_agent()
 
         agent = client.chat.completions.create(
-        model="gpt-4-0125-preview",
+        model="gpt-4-turbo",
         messages=[
         {"role": "system", "content": 
             "You are a mobile robot with a base allow you to move around the environment.\n\

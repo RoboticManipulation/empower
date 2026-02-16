@@ -230,11 +230,17 @@ class Detection:
     def run_image(self,image_path):
         index_detection = 0
         print("Running detection")
+        print(f"Environment agent info: {self.results_multi['environment_agent_info']}")
         object_relations = self.results_multi['environment_agent_info'].split('\n')
+        
+        # Check if GPT refused to provide relations
+        if "unable" in self.results_multi['environment_agent_info'].lower() or len(object_relations) < 2:
+            print("WARNING: GPT did not provide valid relations. Using empty relations.")
+            object_relations = []
 
         # print("Time")
         # start = time.time()
-        labels = self.get_classes(object_relations)
+        labels = self.get_classes(object_relations) if object_relations else "table"
 
         # print("end vocabulary : " + str(time.time() -start))
 
