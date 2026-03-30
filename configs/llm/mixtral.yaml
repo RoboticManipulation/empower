@@ -1,0 +1,19 @@
+######################################################################
+# Mistral AI — Mixtral / Mistral models
+######################################################################
+# Accessed via the Mistral AI API (api.mistral.ai).
+# Set MISTRAL_API_KEY in your environment or in configs/llm_config.yaml.
+
+# Planning agent — text only (fast, cost-effective Mixtral model)
+model: "open-mixtral-8x22b"        # str — alternatives: "open-mixtral-8x7b",
+                                   #   "mistral-large-latest", "mistral-small-latest"
+
+# Vision agents — requires a multimodal Mistral model (Pixtral family)
+
+# model: "mistral-small-2506" # str ["mistral-large-latest", "mistral-medium-2508", "mistral-medium-2508"]
+vision_model: "mistral-small-2506" #"pixtral-12b-2409"   # str — alternatives: "pixtral-large-2411"
+                                   # NOTE: standard Mixtral models are text-only;
+                                   # Pixtral is used automatically for image tasks.
+
+max_tokens: 1000                   # int
+temperature: 0                     # float [0.0 – 1.0]

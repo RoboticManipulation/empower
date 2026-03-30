@@ -24,6 +24,10 @@ gradio-point-promptable-image
 gradio-sbmp-promptable-image
 
 openai
+langchain-core
+langchain-openai
+langchain-mistralai
+pyyaml
 spacy
 gensim
 openmim

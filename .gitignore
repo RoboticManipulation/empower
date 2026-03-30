@@ -183,3 +183,5 @@ images/
 logs/
 output/
 rosbags/
+config/yolow/*
+data_ur5e/*

@@ -1,0 +1,12 @@
+######################################################################
+# OpenAI ChatGPT
+######################################################################
+# Used for both vision (environment/description agents) and planning.
+# GPT-4o supports image inputs natively, so both roles share one model.
+
+model: "gpt-4o-2024-11-20"        # str — planning agent (text only)
+vision_model: "gpt-4o-2024-11-20" # str — vision agents (image + text)
+                                   #   alternatives: "gpt-4o-mini", "gpt-4-turbo"
+max_tokens: 1000                   # int
+temperature: 0                     # float [0.0 – 1.0]
+seed: 7                            # int — for reproducible outputs

@@ -68,11 +68,18 @@ class YOLOW():
         self.runner.pipeline = Compose(pipeline)
         self.runner.model.eval()
 
-    def set_class_name(self,objects):
-        self.class_names = (objects)
-        self.objects = objects.split(",")
+    def set_class_name(self, objects):
+        if isinstance(objects, (list, tuple)):
+            self.objects = [obj.strip() for obj in objects if obj and obj.strip()]
+            self.class_names = ",".join(self.objects)
+        else:
+            self.class_names = objects
+            self.objects = [obj.strip() for obj in objects.split(",") if obj.strip()]
 
     def get_class_name(self, id):
+        id = int(id)
+        if id < 0 or id >= len(self.objects):
+            return None
         return self.objects[id]
 
     def __call__(self,input_image,max_num_boxes=100,score_thr=0.05,nms_thr=0.5):
@@ -91,9 +98,12 @@ class YOLOW():
             self.runner.model.class_names = texts
             pred_instances = output.pred_instances
 
+        print(f"[YOLOW DEBUG] raw predictions before NMS: {len(pred_instances.scores)}, top scores: {sorted([round(float(s),3) for s in pred_instances.scores], reverse=True)[:10]}")
         keep_idxs = nms(pred_instances.bboxes, pred_instances.scores, iou_threshold=nms_thr)
         pred_instances = pred_instances[keep_idxs]
+        print(f"[YOLOW DEBUG] after NMS: {len(pred_instances.scores)}, scores: {sorted([round(float(s),3) for s in pred_instances.scores], reverse=True)[:10]}")
         pred_instances = pred_instances[pred_instances.scores.float() > score_thr]
+        print(f"[YOLOW DEBUG] after score_thr={score_thr}: {len(pred_instances.scores)} detections")
 
         if len(pred_instances.scores) > max_num_boxes:
             indices = pred_instances.scores.float().topk(max_num_boxes)[1]

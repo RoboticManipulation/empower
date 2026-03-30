@@ -6,7 +6,8 @@ import numpy as np
 import base64
 import math
 import os
-from agents import Agents
+import re
+from agents_langchain import Agents
 
 class Detection:
 
@@ -77,7 +78,10 @@ class Detection:
                 sim = 0
                 min_2 = len(word2)
                 for index_2 in range(min_2):
-                    sim = (self.loader_instance.wv.similarity(word1[index], word2[index_2]))
+                    try:
+                        sim = self.loader_instance.wv.similarity(word1[index], word2[index_2])
+                    except KeyError:
+                        sim = 0
                     if sim > 0.708:
                         found = True
                         sim_word.append(sim)
@@ -91,7 +95,10 @@ class Detection:
                 sim = 0
                 min_1 = len(word1)
                 for index_2 in range(min_1):
-                    sim = (self.loader_instance.wv.similarity(word2[index], word1[index_2]))
+                    try:
+                        sim = self.loader_instance.wv.similarity(word2[index], word1[index_2])
+                    except KeyError:
+                        sim = 0
                     if sim > 0.708:
                         found = True
                         sim_word.append(sim)
@@ -117,6 +124,115 @@ class Detection:
                 list_objects += (" ".join(object))
                 list_objects += ","
         return list_objects[:-1]
+
+    def normalize_object_name(self, name):
+        if not name:
+            return ""
+        normalized = name.strip().lower()
+        normalized = re.sub(r"^[0-9]+\)\s*", "", normalized)
+        normalized = re.sub(r"[^a-z0-9']+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def extract_relation_parts(self, relation):
+        match = re.search(r"\((.*?)\)", relation)
+        if not match:
+            return None
+
+        parts = [part.strip() for part in match.group(1).split(",")]
+        if len(parts) != 3:
+            return None
+        return tuple(parts)
+
+    def is_support_object(self, name):
+        normalized = self.normalize_object_name(name)
+        return normalized in {
+            "shelf",
+            "table",
+            "room",
+            "floor",
+            "rack",
+            "bin",
+            "clothing rack",
+            "recycling bin",
+        }
+
+    def is_structural_label(self, name):
+        normalized = self.normalize_object_name(name)
+        if "shelf" in normalized:
+            return True
+        return normalized in {
+            "cabinet",
+            "table",
+            "room",
+            "floor",
+            "rack",
+            "bin",
+            "clothing rack",
+            "recycling bin",
+        }
+
+    def extract_scene_objects(self, object_relations):
+        seen = set()
+        objects = []
+        for relation in object_relations:
+            parts = self.extract_relation_parts(relation)
+            if not parts:
+                continue
+            for obj_name in (parts[0], parts[2]):
+                if self.is_support_object(obj_name):
+                    continue
+                key = self.normalize_object_name(obj_name)
+                if key and key not in seen:
+                    seen.add(key)
+                    objects.append(obj_name.strip())
+        return objects
+
+    def extract_object_descriptions(self, planning_text):
+        descriptions = {}
+        for line in planning_text.splitlines():
+            line = line.strip()
+            if not line.upper().startswith("GRAB "):
+                continue
+            object_desc = line[5:].strip()
+            canonical_name = object_desc
+            if " of " in object_desc.lower():
+                canonical_name = object_desc.split(" of ", 1)[1].strip()
+            descriptions[self.normalize_object_name(canonical_name)] = object_desc
+        return descriptions
+
+    def get_yoloworld_prompts(self, object_relations, planning_text):
+        prompts = []
+        prompt_to_canonical = {}
+        scene_objects = self.extract_scene_objects(object_relations)
+        object_descriptions = self.extract_object_descriptions(planning_text)
+
+        for object_name in scene_objects:
+            canonical_name = object_name.strip()
+            canonical_key = self.normalize_object_name(canonical_name)
+            aliases = [canonical_name]
+            object_desc = object_descriptions.get(canonical_key)
+
+            if object_desc:
+                aliases.append(object_desc)
+                if " of " in object_desc.lower():
+                    container, described_name = object_desc.split(" of ", 1)
+                    aliases.append(f"{described_name.strip()} {container.strip()}")
+
+            for alias in aliases:
+                alias = alias.strip()
+                if not alias:
+                    continue
+                alias_key = self.normalize_object_name(alias)
+                if alias_key in prompt_to_canonical:
+                    continue
+                prompts.append(alias)
+                prompt_to_canonical[alias_key] = canonical_name
+
+        if not prompts:
+            prompts = ["table"]
+            prompt_to_canonical[self.normalize_object_name("table")] = "table"
+
+        return prompts, prompt_to_canonical
 
     def get_classes(self,object_relations):
         relation_list = []
@@ -148,8 +264,10 @@ class Detection:
 
     def find_bb_relation(self,relation_object):
         index_ = []
+        target = self.normalize_object_name(relation_object)
         for index, detection in self.dict_detections.items():
-            if detection['label'].lower() in relation_object.lower():
+            label = self.normalize_object_name(detection['label'])
+            if label == target or label in target or target in label:
                 index_.append(index)
         return index_
 
@@ -240,11 +358,11 @@ class Detection:
 
         # print("Time")
         # start = time.time()
-        labels = self.get_classes(object_relations) if object_relations else "table"
-
-        # print("end vocabulary : " + str(time.time() -start))
-
-        self.loader_instance.yolow_model.set_class_name(labels)
+        prompt_labels, prompt_to_canonical = self.get_yoloworld_prompts(
+            object_relations,
+            self.results_multi.get("planning_agent_info", ""),
+        )
+        print(f"[DEBUG] YOLO-World labels: {prompt_labels}")
 
         image = cv2.imread(image_path)
         masked_image = image.copy()
@@ -253,17 +371,25 @@ class Detection:
         self.dict_detections = {}
         overlay_ = masked_image 
 
-        #YOLOW inference
-        # start = time.time()
+        self.loader_instance.yolow_model.set_class_name(prompt_labels)
         bboxs, scores, labels_idx = self.loader_instance.yolow_model(image_path)
-        # print("detection: " + str(time.time()- start))
-        # start = time.time()
+        print(f"[DEBUG] YOLO raw detections: {len(scores)} boxes, scores: {[round(float(s),3) for s in scores]}")
+        invalid_class_ids = 0
         for i, (bbox,score,cls_id) in enumerate(zip(bboxs[0], scores, labels_idx[0])):
             x1,y1,x2,y2 = bbox
 
-            if score > 0.1:
+            if score > 0.05:
 
-                label = self.loader_instance.yolow_model.get_class_name(cls_id)
+                prompt_label = self.loader_instance.yolow_model.get_class_name(cls_id)
+                if not prompt_label:
+                    invalid_class_ids += 1
+                    continue
+                label = prompt_to_canonical.get(
+                    self.normalize_object_name(prompt_label),
+                    prompt_label,
+                )
+                if self.is_structural_label(label):
+                    continue
                 masks, _ = self.loader_instance.vit_sam_model(masked_image, bbox)
                
                 if index_detection not in self.dict_detections.keys():
@@ -273,7 +399,6 @@ class Detection:
                     cv2.rectangle(image_yolow, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 1)
                     cv2.putText(image_yolow, f"{label}: {score:.2f}", (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 1)
                     
-                # Convert binary mask to 3-channel image
                 for mask in masks:
                     binary_mask = self.show_mask(mask)
                     overlay = masked_image
@@ -282,6 +407,9 @@ class Detection:
                     cv2.imwrite(self.loader_instance.DUMP_DIR+f"rgb_{index_detection}.jpg", overlay)
                     overlay_ = cv2.addWeighted(overlay_, 1, binary_mask, 0.5, 0)
                 index_detection += 1
+
+        if invalid_class_ids:
+            print(f"[DEBUG] Skipped {invalid_class_ids} detections with invalid class ids")
         
         # print("mask : " + str(i) + " : " + str(time.time() -start))
         cv2.imwrite(self.loader_instance.DUMP_DIR+"mask.jpg", overlay_)

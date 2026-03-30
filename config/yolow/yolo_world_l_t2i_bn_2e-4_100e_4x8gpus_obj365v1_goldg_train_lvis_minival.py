@@ -512,7 +512,7 @@ model = dict(
             512,
         ],
         norm_cfg=dict(eps=0.001, momentum=0.03, type='BN'),
-        num_csp_blocks=2,
+        num_csp_blocks=3,
         num_heads=[
             4,
             8,
