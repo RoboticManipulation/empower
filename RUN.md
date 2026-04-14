@@ -51,3 +51,10 @@ cd src
 conda activate empower
 python3 execute_task.py
 ```
+
+
+## Step 6 — 
+
+```bash
+USE_CASE=order_by_height python3 color_pcl_local.py
+```
