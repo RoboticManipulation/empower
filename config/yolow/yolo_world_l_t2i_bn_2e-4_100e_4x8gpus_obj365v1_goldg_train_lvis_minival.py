@@ -333,7 +333,7 @@ last_transform = [
         ),
         type='mmdet.PackDetInputs'),
 ]
-load_from = '/home/ehsanullahm1/ros1/codebase_ros1_empower/empower/config/yolow/yolow.pth'
+load_from = '/home/user/ehsanullahm1/codebase/standalone_conda_empower/empower/config/yolow/yolow.pth'
 log_level = 'WARNING'
 log_processor = dict(by_epoch=True, type='LogProcessor', window_size=50)
 loss_bbox_weight = 7.5
@@ -1363,4 +1363,4 @@ visualizer = dict(
     ])
 weight_decay = 0.025
 widen_factor = 1.0
-work_dir = '/home/ehsanullahm1/ros1/codebase_ros1_empower/empower/config/yolow/'
+work_dir = '/home/user/ehsanullahm1/codebase/standalone_conda_empower/empower/config/yolow/'
