@@ -20,6 +20,16 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
+def _resolve_api_key(yaml_value, env_var: str):
+    """Use YAML key if set to a non-placeholder value, else ``os.environ[env_var]``."""
+    if yaml_value is None:
+        return os.environ.get(env_var)
+    s = str(yaml_value).strip()
+    if not s or s == "...":
+        return os.environ.get(env_var)
+    return s
+
+
 def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = False):
     """Instantiate a LangChain chat model for *provider*.
 
@@ -34,7 +44,7 @@ def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = Fa
     model_name = llm_cfg[model_key]
 
     if provider == "openai":
-        api_key = master_cfg.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
+        api_key = _resolve_api_key(master_cfg.get("openai_api_key"), "OPENAI_API_KEY")
         kwargs = dict(
             model=model_name,
             api_key=api_key,
@@ -46,7 +56,7 @@ def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = Fa
         return ChatOpenAI(**kwargs)
 
     elif provider == "mixtral":
-        api_key = master_cfg.get("mistral_api_key") or os.environ.get("MISTRAL_API_KEY")
+        api_key = _resolve_api_key(master_cfg.get("mistral_api_key"), "MISTRAL_API_KEY")
         return ChatMistralAI(
             model=model_name,
             api_key=api_key,

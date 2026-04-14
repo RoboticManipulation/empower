@@ -9,5 +9,5 @@ llm_provider: "mixtral"
 # Leave empty ("") to fall back on the corresponding environment variable:
 #   OpenAI  → OPENAI_API_KEY
 #   Mixtral → MISTRAL_API_KEY
-openai_api_key: "..."
-mistral_api_key: "..."
+openai_api_key: ""
+mistral_api_key: ""
