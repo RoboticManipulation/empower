@@ -3,21 +3,13 @@
 
 ---
 
-## Step 1 — Install in the devcontainer Python and download weights
+## Step 1 — Create conda env and download weights
 
 ```bash
-cd /home/$USER/ws/packages/empower
-./set_up_empower
+bash set_up_empower
 ```
 
-This uses the container's default Python 3.10, installs the Torch/OpenMMLab versions that YOLO-World expects, and fetches model files under `config/`. It does not use conda or a separate Python virtual environment.
-
-Useful rerun options:
-
-```bash
-EMPOWER_INSTALL_DEPS=0 ./set_up_empower       # only create folders/download missing weights
-EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower  # only install/verify Python dependencies
-```
+This creates the `empower` conda environment (if missing), installs Python dependencies, and fetches model files under `config/`.
 
 ---
 
@@ -34,6 +26,7 @@ Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"` or `"mixtral"`
 
 ```bash
 cd src
+conda activate empower
 
 python3 prepare_local_data.py order_by_height 5 0
 python3 prepare_local_data.py order_by_height 5 1
@@ -45,6 +38,7 @@ python3 prepare_local_data.py order_by_height 5 1
 
 ```bash
 cd src
+conda activate empower
 python3 models_cacher.py order_by_height
 ```
 
@@ -54,6 +48,7 @@ python3 models_cacher.py order_by_height
 
 ```bash
 cd src
+conda activate empower
 python3 execute_task.py
 ```
 
@@ -61,6 +56,5 @@ python3 execute_task.py
 ## Step 6 — 
 
 ```bash
-cd src
 USE_CASE=order_by_height python3 color_pcl_local.py
 ```

@@ -1,63 +1,173 @@
 #!/usr/bin/env bash
-# Standalone setup for Empower (no devcontainer required).
-# - Creates the "empower" conda env and installs Python deps only if the env does not exist.
-# - Always ensures model weights under config/ (skips any file that is already non-empty).
-# - Creates images/ and output/ at the repo root.
+# Container-native setup for Empower (ROS Humble / Python 3.10).
+# - Installs Empower's Python dependencies into the active container Python.
+# - Installs the Torch/OpenMMLab versions YOLO-World expects.
+# - Downloads model weights under config/ (skips any file that is already non-empty).
+# - Creates images/ and output/ at the Empower repo root.
 #
-# Usage: from the empower repo root:
-#   chmod +x set_up_empower   # once
+# Usage, from packages/empower:
 #   ./set_up_empower
 #
-# Optional: MINICONDA=/path/to/miniconda3 if conda is not on PATH and not under ~/miniconda3 or ~/anaconda3.
+# Useful overrides:
+#   PYTHON=/usr/bin/python3 ./set_up_empower
+#   EMPOWER_INSTALL_DEPS=0 ./set_up_empower
+#   EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower
+#   EMPOWER_MMCV_PACKAGE=mmcv-lite ./set_up_empower   # import-only fallback
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_NAME="empower"
-PYTHON_VER="3.8.18"
+PYTHON_BIN="${PYTHON:-python3}"
+REQ_FILE="${ROOT}/requirements-container.txt"
+EMPOWER_INSTALL_DEPS="${EMPOWER_INSTALL_DEPS:-1}"
+EMPOWER_DOWNLOAD_WEIGHTS="${EMPOWER_DOWNLOAD_WEIGHTS:-1}"
+EMPOWER_MMCV_PACKAGE="${EMPOWER_MMCV_PACKAGE:-mmcv}"
+EMPOWER_TORCH_INDEX_URL="${EMPOWER_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu118}"
+EMPOWER_MMCV_FIND_LINKS="${EMPOWER_MMCV_FIND_LINKS:-https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html}"
 
 err() { echo "[ERROR] $*" >&2; exit 1; }
 
-_source_conda() {
-  if [ -n "${MINICONDA:-}" ] && [ -f "${MINICONDA}/etc/profile.d/conda.sh" ]; then
-    # shellcheck source=/dev/null
-    source "${MINICONDA}/etc/profile.d/conda.sh"
-    return 0
-  fi
-  if [ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]; then
-    # shellcheck source=/dev/null
-    source "${HOME}/miniconda3/etc/profile.d/conda.sh"
-    return 0
-  fi
-  if [ -f "${HOME}/anaconda3/etc/profile.d/conda.sh" ]; then
-    # shellcheck source=/dev/null
-    source "${HOME}/anaconda3/etc/profile.d/conda.sh"
-    return 0
-  fi
-  if [ -f "${HOME}/miniforge3/etc/profile.d/conda.sh" ]; then
-    # shellcheck source=/dev/null
-    source "${HOME}/miniforge3/etc/profile.d/conda.sh"
-    return 0
-  fi
-  if command -v conda >/dev/null 2>&1; then
-    local base
-    base="$(conda info --base)"
-    # shellcheck source=/dev/null
-    source "${base}/etc/profile.d/conda.sh"
-    return 0
-  fi
-  err "conda not found. Install Miniconda/Miniforge, or set MINICONDA to the install prefix."
+_python() {
+  command -v "${PYTHON_BIN}" >/dev/null 2>&1 || err "Python not found: ${PYTHON_BIN}"
+  "${PYTHON_BIN}" "$@"
 }
 
-# Resume-friendly download (same URLs as .devcontainer/noetic-empower/postCreate.sh).
+_check_python() {
+  _python - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(
+        f"[ERROR] Empower devcontainer setup expects Python >= 3.10; found {sys.version.split()[0]}"
+    )
+print(f"[INFO] Using Python {sys.version.split()[0]} at {sys.executable}")
+PY
+}
+
+_pip_user_flag() {
+  if [ "$(id -u)" -eq 0 ] || [ -n "${VIRTUAL_ENV:-}" ]; then
+    return 0
+  fi
+  _python - <<'PY'
+import os
+import sysconfig
+purelib = sysconfig.get_paths().get("purelib", "")
+raise SystemExit(0 if purelib and os.access(purelib, os.W_OK) else 1)
+PY
+}
+
+_pip() {
+  local -a user_flag=()
+  if ! _pip_user_flag; then
+    user_flag=(--user)
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
+  _python -m pip install "${user_flag[@]}" "$@"
+}
+
+_ensure_torch() {
+  _python - <<'PY'
+try:
+    import torch
+    import torchvision
+except Exception as exc:
+    raise SystemExit(1)
+if torch.__version__.startswith("2.0.1") and torchvision.__version__.startswith("0.15.2"):
+    print(f"[INFO] Using Empower torch={torch.__version__}, torchvision={torchvision.__version__}")
+    raise SystemExit(0)
+print(
+    f"[INFO] Found torch={torch.__version__}, torchvision={torchvision.__version__}; "
+    "Empower YOLO-World needs torch==2.0.1/torchvision==0.15.2 for full MMCV."
+)
+raise SystemExit(1)
+PY
+}
+
+_install_torch() {
+  if _ensure_torch; then
+    return 0
+  fi
+  echo "[INFO] Installing Empower Torch stack into the active container Python..."
+  _pip --index-url "${EMPOWER_TORCH_INDEX_URL}" \
+    "torch==2.0.1" "torchvision==0.15.2" "torchaudio==2.0.2"
+  _ensure_torch
+}
+
+_install_deps() {
+  [ -f "${REQ_FILE}" ] || err "Missing requirements file: ${REQ_FILE}"
+
+  echo ""
+  echo "[INFO] Installing Empower dependencies into the active Python environment..."
+  _pip --upgrade "pip<26" "setuptools<80" wheel
+  _install_torch
+  _pip -r "${REQ_FILE}"
+
+  echo ""
+  echo "[INFO] Installing OpenMMLab dependencies..."
+  _pip "mmengine>=0.7.1,<1.0.0"
+  if [ "${EMPOWER_MMCV_PACKAGE}" = "mmcv" ]; then
+    _python -m pip uninstall -y mmcv-lite >/dev/null 2>&1 || true
+    # Full MMCV is required by MMDetection's mmcv.ops imports. Use the wheel
+    # matching torch 2.0.x/cu118 to avoid compiling against newer Torch APIs.
+    _pip -f "${EMPOWER_MMCV_FIND_LINKS}" "mmcv==2.0.1"
+  else
+    _python -m pip uninstall -y mmcv >/dev/null 2>&1 || true
+    # mmcv-lite is useful for import checks, but models_cacher needs full mmcv.
+    _pip "mmcv-lite>=2.0.0rc4,<2.1.0"
+  fi
+  _pip --no-deps "mmdet>=3.0.0,<3.1.0" "mmyolo==0.6.0"
+
+  if ! _python - <<'PY'
+import spacy
+spacy.load("en_core_web_sm")
+PY
+  then
+    echo "[INFO] Downloading spaCy model en_core_web_sm..."
+    _python -m spacy download en_core_web_sm
+  fi
+}
+
+_verify_python_deps() {
+  echo ""
+  echo "[INFO] Verifying Empower imports..."
+  (cd "${ROOT}/src" && _python - <<'PY')
+import importlib
+
+modules = [
+    "torch",
+    "torchvision",
+    "mmcv",
+    "mmengine",
+    "mmdet",
+    "mmyolo",
+    "spacy",
+    "onnxruntime",
+    "open3d",
+    "cv2",
+    "numpy",
+    "models",
+    "loader",
+    "detection",
+]
+
+for name in modules:
+    module = importlib.import_module(name)
+    print(f"[OK] {name} {getattr(module, '__version__', '')}".rstrip())
+
+import spacy
+spacy.load("en_core_web_sm")
+print("[OK] spaCy model en_core_web_sm")
+PY
+}
+
+# Resume-friendly download.
 _download_if_missing() {
   local url="$1"
   local dest="$2"
   if [ -s "${dest}" ]; then
-    echo "[INFO] Already present — skip: ${dest}"
+    echo "[INFO] Already present - skip: ${dest}"
     return 0
   fi
-  echo "[INFO] Downloading → ${dest}"
+  echo "[INFO] Downloading -> ${dest}"
   mkdir -p "$(dirname "${dest}")"
   curl -L --fail --retry 5 --retry-delay 5 -C - -o "${dest}.part" "${url}"
   mv "${dest}.part" "${dest}"
@@ -68,7 +178,7 @@ _download_model_weights() {
   command -v curl >/dev/null 2>&1 || err "curl is required for weight downloads."
 
   echo ""
-  echo "[INFO] Model weights (YOLO-World + EfficientViT-SAM L2)…"
+  echo "[INFO] Model weights (YOLO-World + EfficientViT-SAM L2)..."
 
   _download_if_missing \
     "https://huggingface.co/wondervictor/YOLO-World-V2.1/resolve/main/l_stage1-7d280586.pth" \
@@ -87,44 +197,27 @@ _download_model_weights() {
     "${ROOT}/config/efficientvitsam/efficientvit_sam_l2.pt"
 }
 
-_source_conda
-CONDA_BASE="$(conda info --base)"
-ENV_PREFIX="${CONDA_BASE}/envs/${ENV_NAME}"
+_check_python
+mkdir -p "${ROOT}/images" "${ROOT}/output"
 
-if [ -d "${ENV_PREFIX}" ]; then
-  echo "[INFO] Conda env '${ENV_NAME}' already exists at ${ENV_PREFIX}"
-  echo "[INFO] Skipping conda create and pip/mim install."
-  echo "[INFO] To reinstall from scratch: conda remove -n ${ENV_NAME} --all -y  then re-run this script."
+if [ "${EMPOWER_INSTALL_DEPS}" = "1" ]; then
+  _install_deps
+  _verify_python_deps
 else
-  echo "[INFO] Creating conda env '${ENV_NAME}' (Python ${PYTHON_VER})..."
-  conda create -n "${ENV_NAME}" "python=${PYTHON_VER}" -y
-
-  # shellcheck source=/dev/null
-  source "${CONDA_BASE}/etc/profile.d/conda.sh"
-  conda activate "${ENV_NAME}"
-
-  cd "${ROOT}"
-  if [ ! -f requirements.txt ]; then
-    err "requirements.txt not found in ${ROOT}"
-  fi
-
-  echo "[INFO] Installing Python dependencies (several minutes; downloads PyTorch, mmcv, etc.)..."
-  pip install --upgrade pip
-  pip install "spacy<3.8" "numpy<1.25"
-  pip install -r requirements.txt
-  pip install -U openmim
-  mim install mmcv==2.0.0
-  mim install mmyolo mmdet
-  python -m spacy download en_core_web_sm
-  pip install tomli
+  echo "[INFO] Skipping Python dependency install because EMPOWER_INSTALL_DEPS=0."
 fi
 
-mkdir -p "${ROOT}/images" "${ROOT}/output"
-_download_model_weights
+if [ "${EMPOWER_DOWNLOAD_WEIGHTS}" = "1" ]; then
+  _download_model_weights
+else
+  echo "[INFO] Skipping model downloads because EMPOWER_DOWNLOAD_WEIGHTS=0."
+fi
 
 echo ""
 echo "[OK] Empower repo is ready at ${ROOT}"
-echo "  conda activate ${ENV_NAME}"
 echo "  cd ${ROOT}/src"
+echo "  python3 prepare_local_data.py order_by_height 5 0"
+echo "  python3 models_cacher.py order_by_height"
+echo "  python3 execute_task.py"
 echo ""
 echo "[NOTE] Set MISTRAL_API_KEY or OPENAI_API_KEY (see configs/llm_config.yaml)."
