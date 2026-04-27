@@ -1,17 +1,13 @@
 
-
+import os
 import torch
-from mmengine.config import Config
-from mmengine.dataset import Compose
-from mmengine.runner import Runner
-from mmengine.runner.amp import autocast
-from torchvision.ops import nms
 import numpy as np
 import cv2
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 from efficientvit.export_encoder import SamResize
 from efficientvit.inference import SamDecoder, SamEncoder
+from ultralytics import YOLO
 
 class VitSam():
 
@@ -55,18 +51,19 @@ class VitSam():
 class YOLOW():
 
     def __init__(self,YOLOW_PATH):
-        cfg = Config.fromfile(
-            YOLOW_PATH + "yolo_world_l_t2i_bn_2e-4_100e_4x8gpus_obj365v1_goldg_train_lvis_minival.py"
-        )
-        cfg.work_dir = YOLOW_PATH
-        cfg.load_from = YOLOW_PATH + "yolow.pth"
-        cfg.__setattr__("log_level","WARNING")
-        self.runner = Runner.from_cfg(cfg)
-        self.runner.call_hook("before_run")
-        self.runner.load_or_resume()
-        pipeline = cfg.test_dataloader.dataset.pipeline
-        self.runner.pipeline = Compose(pipeline)
-        self.runner.model.eval()
+        self.model_name = os.environ.get("EMPOWER_YOLOW_MODEL", "yolov8l-worldv2.pt")
+        os.makedirs(YOLOW_PATH, exist_ok=True)
+        if os.path.isabs(self.model_name) or os.path.dirname(self.model_name):
+            self.model = YOLO(self.model_name)
+        else:
+            cwd = os.getcwd()
+            try:
+                os.chdir(YOLOW_PATH)
+                self.model = YOLO(self.model_name)
+            finally:
+                os.chdir(cwd)
+        self.objects = []
+        self.class_names = ""
 
     def set_class_name(self, objects):
         if isinstance(objects, (list, tuple)):
@@ -75,6 +72,11 @@ class YOLOW():
         else:
             self.class_names = objects
             self.objects = [obj.strip() for obj in objects.split(",") if obj.strip()]
+        if not self.objects:
+            return
+        # The extra background prompt mirrors the original YOLO-World wrapper,
+        # while get_class_name() filters it out of Empower's object mapping.
+        self.model.set_classes(self.objects + [" "])
 
     def get_class_name(self, id):
         id = int(id)
@@ -83,37 +85,30 @@ class YOLOW():
         return self.objects[id]
 
     def __call__(self,input_image,max_num_boxes=100,score_thr=0.05,nms_thr=0.5):
+        if not self.objects:
+            return (np.empty((0, 4), dtype=np.float32),), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int64)
 
-        texts = [[t.strip()] for t in self.class_names.split(",")] + [[" "]]
-        data_info = self.runner.pipeline(dict(img_id=0, img_path=input_image,
-                                        texts=texts))
-
-        data_batch = dict(
-            inputs=data_info["inputs"].unsqueeze(0),
-            data_samples=[data_info["data_samples"]],
+        results = self.model.predict(
+            input_image,
+            conf=score_thr,
+            iou=nms_thr,
+            max_det=max_num_boxes,
+            verbose=False,
         )
+        boxes = results[0].boxes
 
-        with autocast(enabled=False), torch.no_grad():
-            output = self.runner.model.test_step(data_batch)[0]
-            self.runner.model.class_names = texts
-            pred_instances = output.pred_instances
+        if boxes is None or len(boxes) == 0:
+            print("[YOLOW DEBUG] after score/NMS: 0 detections")
+            return (np.empty((0, 4), dtype=np.float32),), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int64)
 
-        print(f"[YOLOW DEBUG] raw predictions before NMS: {len(pred_instances.scores)}, top scores: {sorted([round(float(s),3) for s in pred_instances.scores], reverse=True)[:10]}")
-        keep_idxs = nms(pred_instances.bboxes, pred_instances.scores, iou_threshold=nms_thr)
-        pred_instances = pred_instances[keep_idxs]
-        print(f"[YOLOW DEBUG] after NMS: {len(pred_instances.scores)}, scores: {sorted([round(float(s),3) for s in pred_instances.scores], reverse=True)[:10]}")
-        pred_instances = pred_instances[pred_instances.scores.float() > score_thr]
-        print(f"[YOLOW DEBUG] after score_thr={score_thr}: {len(pred_instances.scores)} detections")
+        xyxy = boxes.xyxy.detach().cpu().numpy().astype(np.float32)
+        confidence = boxes.conf.detach().cpu().numpy().astype(np.float32)
+        class_id = boxes.cls.detach().cpu().numpy().astype(np.int64)
 
-        if len(pred_instances.scores) > max_num_boxes:
-            indices = pred_instances.scores.float().topk(max_num_boxes)[1]
-            pred_instances = pred_instances[indices]
-        output.pred_instances = pred_instances
+        valid = class_id < len(self.objects)
+        xyxy = xyxy[valid]
+        confidence = confidence[valid]
+        class_id = class_id[valid]
 
-        pred_instances = pred_instances.cpu().numpy()
-
-        xyxy=pred_instances['bboxes'],
-        class_id=pred_instances['labels'],
-        confidence=pred_instances['scores'] 
-
-        return xyxy, confidence, class_id
+        print(f"[YOLOW DEBUG] after score/NMS: {len(confidence)} detections, scores: {sorted([round(float(s),3) for s in confidence], reverse=True)[:10]}")
+        return (xyxy,), confidence, class_id

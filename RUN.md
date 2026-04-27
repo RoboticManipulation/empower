@@ -10,13 +10,14 @@ cd /home/$USER/ws/packages/empower
 ./set_up_empower
 ```
 
-This uses the container's default Python 3.10, installs the Torch/OpenMMLab versions that YOLO-World expects, and fetches model files under `config/`. It does not use conda or a separate Python virtual environment.
+This uses the container's default Python 3.10 and keeps the devcontainer Torch stack intact. YOLO-World runs through the Ultralytics backend instead of OpenMMLab/MMCV, and EfficientViT-SAM model files are fetched under `config/`. It does not use conda or a separate Python virtual environment.
 
 Useful rerun options:
 
 ```bash
 EMPOWER_INSTALL_DEPS=0 ./set_up_empower       # only create folders/download missing weights
 EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower  # only install/verify Python dependencies
+EMPOWER_YOLOW_MODEL=yolov8s-worldv2.pt ./set_up_empower  # optional smaller YOLO-World model
 ```
 
 ---

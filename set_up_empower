@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Container-native setup for Empower (ROS Humble / Python 3.10).
 # - Installs Empower's Python dependencies into the active container Python.
-# - Installs the Torch/OpenMMLab versions YOLO-World expects.
-# - Downloads model weights under config/ (skips any file that is already non-empty).
+# - Uses the devcontainer's existing Torch stack; YOLO-World runs via Ultralytics.
+# - Downloads EfficientViT-SAM weights under config/ (skips any file that is already non-empty).
 # - Creates images/ and output/ at the Empower repo root.
 #
 # Usage, from packages/empower:
@@ -12,7 +12,7 @@
 #   PYTHON=/usr/bin/python3 ./set_up_empower
 #   EMPOWER_INSTALL_DEPS=0 ./set_up_empower
 #   EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower
-#   EMPOWER_MMCV_PACKAGE=mmcv-lite ./set_up_empower   # import-only fallback
+#   EMPOWER_YOLOW_MODEL=yolov8s-worldv2.pt ./set_up_empower
 
 set -euo pipefail
 
@@ -21,9 +21,7 @@ PYTHON_BIN="${PYTHON:-python3}"
 REQ_FILE="${ROOT}/requirements-container.txt"
 EMPOWER_INSTALL_DEPS="${EMPOWER_INSTALL_DEPS:-1}"
 EMPOWER_DOWNLOAD_WEIGHTS="${EMPOWER_DOWNLOAD_WEIGHTS:-1}"
-EMPOWER_MMCV_PACKAGE="${EMPOWER_MMCV_PACKAGE:-mmcv}"
-EMPOWER_TORCH_INDEX_URL="${EMPOWER_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu118}"
-EMPOWER_MMCV_FIND_LINKS="${EMPOWER_MMCV_FIND_LINKS:-https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html}"
+EMPOWER_YOLOW_MODEL="${EMPOWER_YOLOW_MODEL:-yolov8l-worldv2.pt}"
 
 err() { echo "[ERROR] $*" >&2; exit 1; }
 
@@ -64,57 +62,13 @@ _pip() {
   _python -m pip install "${user_flag[@]}" "$@"
 }
 
-_ensure_torch() {
-  _python - <<'PY'
-try:
-    import torch
-    import torchvision
-except Exception as exc:
-    raise SystemExit(1)
-if torch.__version__.startswith("2.0.1") and torchvision.__version__.startswith("0.15.2"):
-    print(f"[INFO] Using Empower torch={torch.__version__}, torchvision={torchvision.__version__}")
-    raise SystemExit(0)
-print(
-    f"[INFO] Found torch={torch.__version__}, torchvision={torchvision.__version__}; "
-    "Empower YOLO-World needs torch==2.0.1/torchvision==0.15.2 for full MMCV."
-)
-raise SystemExit(1)
-PY
-}
-
-_install_torch() {
-  if _ensure_torch; then
-    return 0
-  fi
-  echo "[INFO] Installing Empower Torch stack into the active container Python..."
-  _pip --index-url "${EMPOWER_TORCH_INDEX_URL}" \
-    "torch==2.0.1" "torchvision==0.15.2" "torchaudio==2.0.2"
-  _ensure_torch
-}
-
 _install_deps() {
   [ -f "${REQ_FILE}" ] || err "Missing requirements file: ${REQ_FILE}"
 
   echo ""
   echo "[INFO] Installing Empower dependencies into the active Python environment..."
-  _pip --upgrade "pip<26" "setuptools<80" wheel
-  _install_torch
+  _pip --upgrade "pip<26" wheel
   _pip -r "${REQ_FILE}"
-
-  echo ""
-  echo "[INFO] Installing OpenMMLab dependencies..."
-  _pip "mmengine>=0.7.1,<1.0.0"
-  if [ "${EMPOWER_MMCV_PACKAGE}" = "mmcv" ]; then
-    _python -m pip uninstall -y mmcv-lite >/dev/null 2>&1 || true
-    # Full MMCV is required by MMDetection's mmcv.ops imports. Use the wheel
-    # matching torch 2.0.x/cu118 to avoid compiling against newer Torch APIs.
-    _pip -f "${EMPOWER_MMCV_FIND_LINKS}" "mmcv==2.0.1"
-  else
-    _python -m pip uninstall -y mmcv >/dev/null 2>&1 || true
-    # mmcv-lite is useful for import checks, but models_cacher needs full mmcv.
-    _pip "mmcv-lite>=2.0.0rc4,<2.1.0"
-  fi
-  _pip --no-deps "mmdet>=3.0.0,<3.1.0" "mmyolo==0.6.0"
 
   if ! _python - <<'PY'
 import spacy
@@ -135,10 +89,7 @@ import importlib
 modules = [
     "torch",
     "torchvision",
-    "mmcv",
-    "mmengine",
-    "mmdet",
-    "mmyolo",
+    "ultralytics",
     "spacy",
     "onnxruntime",
     "open3d",
@@ -156,6 +107,20 @@ for name in modules:
 import spacy
 spacy.load("en_core_web_sm")
 print("[OK] spaCy model en_core_web_sm")
+PY
+}
+
+_warm_yoloworld_model() {
+  echo ""
+  echo "[INFO] Checking Ultralytics YOLO-World model (${EMPOWER_YOLOW_MODEL})..."
+  mkdir -p "${ROOT}/config/yolow"
+  (cd "${ROOT}/config/yolow" && EMPOWER_YOLOW_MODEL="${EMPOWER_YOLOW_MODEL}" _python - <<'PY')
+import os
+from ultralytics import YOLO
+
+model_name = os.environ["EMPOWER_YOLOW_MODEL"]
+YOLO(model_name)
+print(f"[OK] YOLO-World model available: {model_name}")
 PY
 }
 
@@ -178,11 +143,8 @@ _download_model_weights() {
   command -v curl >/dev/null 2>&1 || err "curl is required for weight downloads."
 
   echo ""
-  echo "[INFO] Model weights (YOLO-World + EfficientViT-SAM L2)..."
-
-  _download_if_missing \
-    "https://huggingface.co/wondervictor/YOLO-World-V2.1/resolve/main/l_stage1-7d280586.pth" \
-    "${ROOT}/config/yolow/yolow.pth"
+  echo "[INFO] Model weights (Ultralytics YOLO-World + EfficientViT-SAM L2)..."
+  _warm_yoloworld_model
 
   _download_if_missing \
     "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l2_encoder.onnx" \
