@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Container-native setup for Empower (ROS Humble / Python 3.10).
 # - Installs Empower's Python dependencies into the active container Python.
-# - Uses the devcontainer's existing Torch stack; YOLO-World runs via Ultralytics.
-# - Downloads EfficientViT-SAM weights under config/ (skips any file that is already non-empty).
+# - Uses the devcontainer's existing Torch stack; detection runs through SAM3.
+# - Resolves the SAM3 Hugging Face checkpoint into the local cache.
 # - Creates images/ and output/ at the Empower repo root.
 #
 # Usage, from packages/empower:
@@ -12,7 +12,7 @@
 #   PYTHON=/usr/bin/python3 ./set_up_empower
 #   EMPOWER_INSTALL_DEPS=0 ./set_up_empower
 #   EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower
-#   EMPOWER_YOLOW_MODEL=yolov8s-worldv2.pt ./set_up_empower
+#   EMPOWER_SAM3_CHECKPOINT=/path/to/sam3.pt ./set_up_empower
 
 set -euo pipefail
 
@@ -21,7 +21,6 @@ PYTHON_BIN="${PYTHON:-python3}"
 REQ_FILE="${ROOT}/requirements-container.txt"
 EMPOWER_INSTALL_DEPS="${EMPOWER_INSTALL_DEPS:-1}"
 EMPOWER_DOWNLOAD_WEIGHTS="${EMPOWER_DOWNLOAD_WEIGHTS:-1}"
-EMPOWER_YOLOW_MODEL="${EMPOWER_YOLOW_MODEL:-yolov8l-worldv2.pt}"
 
 err() { echo "[ERROR] $*" >&2; exit 1; }
 
@@ -69,6 +68,11 @@ _install_deps() {
   echo "[INFO] Installing Empower dependencies into the active Python environment..."
   _pip --upgrade "pip<26" wheel
   _pip -r "${REQ_FILE}"
+  if [ -d "${ROOT}/../sam3" ]; then
+    _pip -e "${ROOT}/../sam3"
+  else
+    echo "[WARN] Local SAM3 package not found at ${ROOT}/../sam3"
+  fi
 
   if ! _python - <<'PY'
 import spacy
@@ -89,12 +93,11 @@ import importlib
 modules = [
     "torch",
     "torchvision",
-    "ultralytics",
     "spacy",
-    "onnxruntime",
     "open3d",
     "cv2",
     "numpy",
+    "sam3",
     "models",
     "loader",
     "detection",
@@ -110,53 +113,50 @@ print("[OK] spaCy model en_core_web_sm")
 PY
 }
 
-_warm_yoloworld_model() {
+_warm_sam3_model() {
   echo ""
-  echo "[INFO] Checking Ultralytics YOLO-World model (${EMPOWER_YOLOW_MODEL})..."
-  mkdir -p "${ROOT}/config/yolow"
-  (cd "${ROOT}/config/yolow" && EMPOWER_YOLOW_MODEL="${EMPOWER_YOLOW_MODEL}" _python - <<'PY')
+  echo "[INFO] Checking SAM3 checkpoint..."
+  (cd "${ROOT}/src" && _python - <<'PY')
 import os
-from ultralytics import YOLO
 
-model_name = os.environ["EMPOWER_YOLOW_MODEL"]
-YOLO(model_name)
-print(f"[OK] YOLO-World model available: {model_name}")
+from huggingface_hub import hf_hub_download
+
+checkpoint = os.environ.get("EMPOWER_SAM3_CHECKPOINT")
+if checkpoint:
+    print(f"[OK] Using EMPOWER_SAM3_CHECKPOINT={checkpoint}")
+else:
+    token_present = bool(
+        os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
+    for filename in ("config.json", "sam3.pt"):
+        try:
+            path = hf_hub_download(
+                repo_id="facebook/sam3",
+                filename=filename,
+                local_files_only=not token_present,
+            )
+        except Exception as exc:
+            if token_present:
+                raise
+            raise SystemExit(
+                "[ERROR] SAM3 checkpoint is not cached and HF_TOKEN is not set. "
+                "Export HF_TOKEN or set EMPOWER_SAM3_CHECKPOINT=/path/to/sam3.pt."
+            ) from exc
+        print(f"[OK] SAM3 {filename}: {path}")
+
+from models import SAM3Detector
+
+detector = SAM3Detector(checkpoint_path=checkpoint)
+print(f"[OK] SAM3 detector initialized on {detector.device}")
 PY
 }
 
-# Resume-friendly download.
-_download_if_missing() {
-  local url="$1"
-  local dest="$2"
-  if [ -s "${dest}" ]; then
-    echo "[INFO] Already present - skip: ${dest}"
-    return 0
-  fi
-  echo "[INFO] Downloading -> ${dest}"
-  mkdir -p "$(dirname "${dest}")"
-  curl -L --fail --retry 5 --retry-delay 5 -C - -o "${dest}.part" "${url}"
-  mv "${dest}.part" "${dest}"
-  ls -lah "${dest}"
-}
-
 _download_model_weights() {
-  command -v curl >/dev/null 2>&1 || err "curl is required for weight downloads."
-
   echo ""
-  echo "[INFO] Model weights (Ultralytics YOLO-World + EfficientViT-SAM L2)..."
-  _warm_yoloworld_model
-
-  _download_if_missing \
-    "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l2_encoder.onnx" \
-    "${ROOT}/config/efficientvitsam/l2_encoder.onnx"
-
-  _download_if_missing \
-    "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l2_decoder.onnx" \
-    "${ROOT}/config/efficientvitsam/l2_decoder.onnx"
-
-  _download_if_missing \
-    "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/efficientvit_sam_l2.pt" \
-    "${ROOT}/config/efficientvitsam/efficientvit_sam_l2.pt"
+  echo "[INFO] Model weights (SAM3)..."
+  _warm_sam3_model
 }
 
 _check_python
@@ -182,4 +182,4 @@ echo "  python3 prepare_local_data.py order_by_height 5 0"
 echo "  python3 models_cacher.py order_by_height"
 echo "  python3 execute_task.py"
 echo ""
-echo "[NOTE] Set MISTRAL_API_KEY or OPENAI_API_KEY (see configs/llm_config.yaml)."
+echo "[NOTE] Export MISTRAL_API_KEY or OPENAI_API_KEY before running LLM agents."

@@ -117,13 +117,16 @@ class Detection:
                 return True
         return False
 
-    def list_to_yoloworld(self,list):
+    def list_to_prompt_string(self,list):
         list_objects = ""
         for object in list:
             if object != []:
                 list_objects += (" ".join(object))
                 list_objects += ","
         return list_objects[:-1]
+
+    def list_to_yoloworld(self, list):
+        return self.list_to_prompt_string(list)
 
     def normalize_object_name(self, name):
         if not name:
@@ -200,23 +203,216 @@ class Detection:
             descriptions[self.normalize_object_name(canonical_name)] = object_desc
         return descriptions
 
-    def get_yoloworld_prompts(self, object_relations, planning_text):
+    def unique_preserve_order(self, values):
+        seen = set()
+        unique = []
+        for value in values:
+            value = re.sub(r"\s+", " ", value.strip().lower())
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+        return unique
+
+    def get_prompt_tokens(self, object_name):
+        normalized = self.normalize_object_name(object_name)
+        tokens = normalized.split()
+        stopwords = {
+            "a",
+            "an",
+            "and",
+            "for",
+            "in",
+            "it",
+            "of",
+            "on",
+            "the",
+            "to",
+            "with",
+        }
+        cleaned = []
+        for token in tokens:
+            if token.endswith("'s"):
+                continue
+            if token in stopwords:
+                continue
+            cleaned.append(token)
+        return cleaned
+
+    def get_sam3_prompt_aliases(self, object_name, relation_descriptors=None):
+        tokens = self.get_prompt_tokens(object_name)
+        if not tokens:
+            return []
+
+        category_heads = {
+            "bag",
+            "basket",
+            "bin",
+            "book",
+            "bottle",
+            "bowl",
+            "box",
+            "cabinet",
+            "can",
+            "carton",
+            "container",
+            "cup",
+            "dish",
+            "jacket",
+            "jar",
+            "mug",
+            "package",
+            "packet",
+            "plate",
+            "roll",
+            "shelf",
+            "spray",
+            "tray",
+        }
+        generic_container_heads = {
+            "bag",
+            "basket",
+            "bin",
+            "bottle",
+            "box",
+            "can",
+            "carton",
+            "container",
+            "jar",
+            "package",
+            "packet",
+        }
+        visual_descriptors = {
+            "black",
+            "blue",
+            "brown",
+            "clear",
+            "dark",
+            "gray",
+            "green",
+            "grey",
+            "large",
+            "light",
+            "metal",
+            "orange",
+            "paper",
+            "plastic",
+            "purple",
+            "red",
+            "small",
+            "tall",
+            "transparent",
+            "white",
+            "wood",
+            "wooden",
+            "yellow",
+        }
+
+        head_index = len(tokens) - 1
+        for index in range(len(tokens) - 1, -1, -1):
+            if tokens[index] in category_heads:
+                head_index = index
+                break
+
+        head = tokens[head_index]
+        aliases = []
+
+        for start in range(0, head_index):
+            phrase_tokens = tokens[start : head_index + 1]
+            if len(phrase_tokens) >= 2:
+                aliases.append(" ".join(phrase_tokens))
+
+        for token in tokens[:head_index]:
+            aliases.append(f"{token} {head}")
+
+        descriptors = [token for token in tokens[:head_index] if token in visual_descriptors]
+        for descriptor in descriptors:
+            aliases.append(f"{descriptor} {head}")
+        if len(descriptors) >= 2:
+            aliases.append(" ".join(descriptors + [head]))
+
+        if head not in generic_container_heads:
+            aliases.append(head)
+
+        relation_descriptors = relation_descriptors or set()
+        positional_aliases = []
+        for descriptor in sorted(relation_descriptors):
+            for alias in aliases:
+                alias_tokens = alias.split()
+                if len(alias_tokens) <= 3:
+                    positional_aliases.append(f"{descriptor} {alias}")
+            positional_aliases.append(f"{descriptor} {head}")
+        aliases.extend(positional_aliases)
+
+        return self.unique_preserve_order(aliases)
+
+    def get_relation_prompt_descriptors(self, object_relations):
+        descriptors = {}
+        for relation in object_relations:
+            parts = self.extract_relation_parts(relation)
+            if not parts:
+                continue
+
+            object_first, relation_type, object_second = parts
+            first_key = self.normalize_object_name(object_first)
+            second_key = self.normalize_object_name(object_second)
+            relation_type = relation_type.lower()
+
+            if "left" in relation_type:
+                descriptors.setdefault(first_key, set()).add("left")
+                descriptors.setdefault(second_key, set()).add("right")
+            elif "right" in relation_type:
+                descriptors.setdefault(first_key, set()).add("right")
+                descriptors.setdefault(second_key, set()).add("left")
+            elif "front" in relation_type:
+                descriptors.setdefault(first_key, set()).add("front")
+                descriptors.setdefault(second_key, set()).add("back")
+            elif "behind" in relation_type or "back" in relation_type:
+                descriptors.setdefault(first_key, set()).add("back")
+                descriptors.setdefault(second_key, set()).add("front")
+
+        for object_key, object_descriptors in descriptors.items():
+            if {"left", "right"}.issubset(object_descriptors):
+                object_descriptors.discard("left")
+                object_descriptors.discard("right")
+            if {"front", "back"}.issubset(object_descriptors):
+                object_descriptors.discard("front")
+                object_descriptors.discard("back")
+
+        return descriptors
+
+    def get_detection_prompts(self, object_relations, planning_text):
         prompts = []
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
+        relation_descriptors = self.get_relation_prompt_descriptors(object_relations)
 
         for object_name in scene_objects:
             canonical_name = object_name.strip()
             canonical_key = self.normalize_object_name(canonical_name)
             aliases = [canonical_name]
             object_desc = object_descriptions.get(canonical_key)
+            canonical_descriptors = relation_descriptors.get(canonical_key, set())
 
             if object_desc:
                 aliases.append(object_desc)
                 if " of " in object_desc.lower():
                     container, described_name = object_desc.split(" of ", 1)
                     aliases.append(f"{described_name.strip()} {container.strip()}")
+            aliases.extend(
+                self.get_sam3_prompt_aliases(
+                    canonical_name,
+                    relation_descriptors=canonical_descriptors,
+                )
+            )
+            if object_desc:
+                aliases.extend(
+                    self.get_sam3_prompt_aliases(
+                        object_desc,
+                        relation_descriptors=canonical_descriptors,
+                    )
+                )
 
             for alias in aliases:
                 alias = alias.strip()
@@ -234,14 +430,17 @@ class Detection:
 
         return prompts, prompt_to_canonical
 
+    def get_yoloworld_prompts(self, object_relations, planning_text):
+        return self.get_detection_prompts(object_relations, planning_text)
+
     def get_classes(self,object_relations):
         relation_list = []
 
         for relation in object_relations:
-
-            relation = relation.replace("(", "")
-            relation_object_first = relation.split(")")[1].split(",")[0]
-            relation_object_second = relation.split(")")[1].split(",")[2]
+            parts = self.extract_relation_parts(relation)
+            if not parts:
+                continue
+            relation_object_first, _, relation_object_second = parts
             word_1 = self.split_word(relation_object_first)
             word_2 = self.split_word(relation_object_second)
             if not self.is_in_list(word_1,relation_list):
@@ -249,18 +448,113 @@ class Detection:
             if not self.is_in_list(word_2,relation_list):
                 relation_list.append(word_2)
 
-        return self.list_to_yoloworld(relation_list)
+        return self.list_to_prompt_string(relation_list)
 
     def show_mask(self,mask, random_color = True):
+        if hasattr(mask, "detach"):
+            mask = mask.detach().cpu().numpy()
+        mask = np.squeeze(np.asarray(mask))
+        if mask.ndim != 2:
+            raise ValueError(f"Expected a 2D mask, got shape {mask.shape}")
+        mask = mask > 0
         if random_color:
             color = np.concatenate([np.random.random(3)], axis=0)
         else:
             color = np.array([30 / 255, 144 / 255, 255 / 255])
         h, w = mask.shape[-2:]
         mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
-        mask_image = mask_image.numpy() * 255
+        mask_image = mask_image * 255
         mask_image = mask_image.astype(np.uint8)
         return mask_image
+
+    def box_iou(self, box_a, box_b):
+        xa1, ya1, xa2, ya2 = box_a
+        xb1, yb1, xb2, yb2 = box_b
+        inter_x1 = max(xa1, xb1)
+        inter_y1 = max(ya1, yb1)
+        inter_x2 = min(xa2, xb2)
+        inter_y2 = min(ya2, yb2)
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        area_a = max(0, xa2 - xa1) * max(0, ya2 - ya1)
+        area_b = max(0, xb2 - xb1) * max(0, yb2 - yb1)
+        union = area_a + area_b - inter_area
+        return 0.0 if union == 0 else inter_area / union
+
+    def mask_iou(self, mask_a, mask_b):
+        mask_a = np.squeeze(mask_a).astype(bool)
+        mask_b = np.squeeze(mask_b).astype(bool)
+        intersection = np.logical_and(mask_a, mask_b).sum()
+        union = np.logical_or(mask_a, mask_b).sum()
+        return 0.0 if union == 0 else intersection / union
+
+    def sam3_rank_score(self, score, prompt_label, canonical_label):
+        prompt = self.normalize_object_name(prompt_label)
+        canonical = self.normalize_object_name(canonical_label)
+        rank_score = float(score)
+
+        if prompt == canonical:
+            rank_score += 0.45
+        elif prompt and (prompt in canonical or canonical in prompt):
+            rank_score += 0.10
+
+        prompt_tokens = prompt.split()
+        if prompt_tokens and prompt_tokens[0] in {"left", "right", "front", "back"}:
+            rank_score += 0.20
+
+        rank_score += min(len(prompt_tokens), 5) * 0.005
+        return rank_score
+
+    def sam3_detections(self, sam3_results, prompt_to_canonical):
+        candidates = []
+        max_per_object = int(os.environ.get("EMPOWER_SAM3_MAX_PER_OBJECT", "1"))
+        boxes = sam3_results["boxes"]
+        scores = sam3_results["scores"]
+        class_ids = sam3_results["class_ids"]
+        masks = sam3_results["masks"]
+
+        for bbox, score, class_id, mask in zip(boxes, scores, class_ids, masks):
+            prompt_label = self.loader_instance.sam3_model.get_class_name(class_id)
+            if not prompt_label:
+                continue
+            label = prompt_to_canonical.get(
+                self.normalize_object_name(prompt_label),
+                prompt_label,
+            )
+            if self.is_structural_label(label):
+                continue
+            candidates.append(
+                {
+                    "bbox": bbox.astype(np.float32),
+                    "score": float(score),
+                    "rank_score": self.sam3_rank_score(score, prompt_label, label),
+                    "label": label,
+                    "mask": mask,
+                    "prompt": prompt_label,
+                }
+            )
+
+        candidates.sort(key=lambda item: item["rank_score"], reverse=True)
+        kept = []
+        label_counts = {}
+        for candidate in candidates:
+            label_key = self.normalize_object_name(candidate["label"])
+            if label_counts.get(label_key, 0) >= max_per_object:
+                continue
+
+            duplicate = False
+            for existing in kept:
+                if (
+                    self.mask_iou(candidate["mask"], existing["mask"]) > 0.80
+                    or self.box_iou(candidate["bbox"], existing["bbox"]) > 0.85
+                ):
+                    duplicate = True
+                    break
+            if not duplicate:
+                kept.append(candidate)
+                label_counts[label_key] = label_counts.get(label_key, 0) + 1
+        return kept
 
     def find_bb_relation(self,relation_object):
         index_ = []
@@ -349,87 +643,109 @@ class Detection:
         index_detection = 0
         print("Running detection")
         print(f"Environment agent info: {self.results_multi['environment_agent_info']}")
-        object_relations = self.results_multi['environment_agent_info'].split('\n')
+        object_relations = [
+            relation.strip()
+            for relation in self.results_multi['environment_agent_info'].split('\n')
+            if relation.strip()
+        ]
         
         # Check if GPT refused to provide relations
-        if "unable" in self.results_multi['environment_agent_info'].lower() or len(object_relations) < 2:
+        if "unable" in self.results_multi['environment_agent_info'].lower() or len(object_relations) < 1:
             print("WARNING: GPT did not provide valid relations. Using empty relations.")
             object_relations = []
 
         # print("Time")
         # start = time.time()
-        prompt_labels, prompt_to_canonical = self.get_yoloworld_prompts(
+        prompt_labels, prompt_to_canonical = self.get_detection_prompts(
             object_relations,
             self.results_multi.get("planning_agent_info", ""),
         )
-        print(f"[DEBUG] YOLO-World labels: {prompt_labels}")
+        print(f"[DEBUG] SAM3 labels: {prompt_labels}")
 
         image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"Unable to read image: {image_path}")
         masked_image = image.copy()
         image_with_bbox = image.copy()
-        image_yolow = image.copy()
+        image_sam3 = image.copy()
         self.dict_detections = {}
         overlay_ = masked_image 
+        for filename in os.listdir(self.loader_instance.DUMP_DIR):
+            if re.match(r"rgb_[0-9]+\.jpg$", filename):
+                os.remove(os.path.join(self.loader_instance.DUMP_DIR, filename))
 
-        self.loader_instance.yolow_model.set_class_name(prompt_labels)
-        bboxs, scores, labels_idx = self.loader_instance.yolow_model(image_path)
-        print(f"[DEBUG] YOLO raw detections: {len(scores)} boxes, scores: {[round(float(s),3) for s in scores]}")
-        invalid_class_ids = 0
-        for i, (bbox,score,cls_id) in enumerate(zip(bboxs[0], scores, labels_idx[0])):
-            x1,y1,x2,y2 = bbox
+        score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.5"))
+        self.loader_instance.sam3_model.set_class_name(prompt_labels)
+        sam3_results = self.loader_instance.sam3_model.detect(
+            image_path,
+            max_num_boxes=100,
+            score_thr=score_thr,
+            nms_thr=0.5,
+        )
+        detections = self.sam3_detections(sam3_results, prompt_to_canonical)
+        print(
+            f"[DEBUG] SAM3 raw detections: {len(sam3_results['scores'])} masks, "
+            f"kept after canonical dedupe: {len(detections)}"
+        )
 
-            if score > 0.05:
+        for detection in detections:
+            bbox = detection["bbox"]
+            score = detection["score"]
+            label = detection["label"]
+            mask = detection["mask"]
+            x1, y1, x2, y2 = bbox
 
-                prompt_label = self.loader_instance.yolow_model.get_class_name(cls_id)
-                if not prompt_label:
-                    invalid_class_ids += 1
-                    continue
-                label = prompt_to_canonical.get(
-                    self.normalize_object_name(prompt_label),
-                    prompt_label,
-                )
-                if self.is_structural_label(label):
-                    continue
-                masks, _ = self.loader_instance.vit_sam_model(masked_image, bbox)
-               
+            if score > score_thr:
                 if index_detection not in self.dict_detections.keys():
                     self.dict_detections[index_detection] = {'bbox':None,'label':None}
                     self.dict_detections[index_detection]['bbox'] = bbox
                     self.dict_detections[index_detection]['label'] = label
-                    cv2.rectangle(image_yolow, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 1)
-                    cv2.putText(image_yolow, f"{label}: {score:.2f}", (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 1)
+                    cv2.rectangle(
+                        image_sam3,
+                        (int(x1), int(y1)),
+                        (int(x2), int(y2)),
+                        (255, 0, 0),
+                        1,
+                    )
+                    cv2.putText(
+                        image_sam3,
+                        f"{label}: {score:.2f}",
+                        (int(x1), int(y1)-10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.9,
+                        (0, 255, 0),
+                        1,
+                    )
                     
-                for mask in masks:
-                    binary_mask = self.show_mask(mask)
-                    overlay = masked_image
-                    self.dict_detections[index_detection]['mask'] = binary_mask
-                    overlay = cv2.addWeighted(overlay, 1, binary_mask, 0.5, 0)
-                    cv2.imwrite(self.loader_instance.DUMP_DIR+f"rgb_{index_detection}.jpg", overlay)
-                    overlay_ = cv2.addWeighted(overlay_, 1, binary_mask, 0.5, 0)
+                binary_mask = self.show_mask(mask)
+                overlay = masked_image
+                self.dict_detections[index_detection]['mask'] = binary_mask
+                overlay = cv2.addWeighted(overlay, 1, binary_mask, 0.5, 0)
+                cv2.imwrite(self.loader_instance.DUMP_DIR+f"rgb_{index_detection}.jpg", overlay)
+                overlay_ = cv2.addWeighted(overlay_, 1, binary_mask, 0.5, 0)
                 index_detection += 1
-
-        if invalid_class_ids:
-            print(f"[DEBUG] Skipped {invalid_class_ids} detections with invalid class ids")
         
         # print("mask : " + str(i) + " : " + str(time.time() -start))
         cv2.imwrite(self.loader_instance.DUMP_DIR+"mask.jpg", overlay_)
-        cv2.imwrite(self.loader_instance.DUMP_DIR+"yolo.jpg", image_yolow)
+        cv2.imwrite(self.loader_instance.DUMP_DIR+"sam3.jpg", image_sam3)
+        cv2.imwrite(self.loader_instance.DUMP_DIR+"yolo.jpg", image_sam3)
 
         self.data_reordered = self.dict_detections.copy()
         # start = time.time()
+        skipped_relations = 0
         for relation in object_relations:
-                relation = relation.replace("(", "")
+            parts = self.extract_relation_parts(relation)
+            if not parts:
+                skipped_relations += 1
+                continue
 
-                relation_object_first = relation.split(")")[1].split(",")[0]
-                relation_object_first = relation_object_first[1:]
-                relation_type = relation.split(")")[1].split(",")[1]
-                relation_type = relation_type[1:]
-                relation_object_second = relation.split(")")[1].split(",")[2]
-                relation_object_second = relation_object_second[1:]
-                index_bounding_box_first = self.find_bb_relation(relation_object_first)
-                index_bounding_box_second = self.find_bb_relation(relation_object_second)
-                if index_bounding_box_first != [] or index_bounding_box_second != []:
-                    self.obtain_bb_grounded(index_bounding_box_first,index_bounding_box_second,relation_type,relation_object_first,relation_object_second)
+            relation_object_first, relation_type, relation_object_second = parts
+            index_bounding_box_first = self.find_bb_relation(relation_object_first)
+            index_bounding_box_second = self.find_bb_relation(relation_object_second)
+            if index_bounding_box_first != [] or index_bounding_box_second != []:
+                self.obtain_bb_grounded(index_bounding_box_first,index_bounding_box_second,relation_type,relation_object_first,relation_object_second)
+        if skipped_relations:
+            print(f"[DEBUG] Skipped {skipped_relations} malformed relation lines")
 
         # print("grounfing : " + str(time.time() -start))
         for i, value in self.data_reordered.items():
@@ -440,4 +756,3 @@ class Detection:
             pickle.dump(self.data_reordered, f, protocol=2)
         
         cv2.imwrite(self.loader_instance.DUMP_DIR+"scan_with_bb.jpg", image_with_bbox)
-        os.system(f'rm -rf {self.loader_instance.YOLOW_PATH}/logs/')

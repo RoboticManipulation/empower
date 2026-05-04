@@ -2,7 +2,7 @@
 # Mistral AI — Mixtral / Mistral models
 ######################################################################
 # Accessed via the Mistral AI API (api.mistral.ai).
-# Set MISTRAL_API_KEY in your environment or in configs/llm_config.yaml.
+# Set MISTRAL_API_KEY in your environment before running Empower.
 
 # Planning agent — text only (fast, cost-effective Mixtral model)
 model: "open-mixtral-8x22b"        # str — alternatives: "open-mixtral-8x7b",

@@ -5,9 +5,6 @@
 # Options: "openai" | "mixtral"
 llm_provider: "mixtral"
 
-# API Keys
-# Leave empty ("") to fall back on the corresponding environment variable:
+# API keys are read from environment variables only:
 #   OpenAI  → OPENAI_API_KEY
 #   Mixtral → MISTRAL_API_KEY
-openai_api_key: ""
-mistral_api_key: ""

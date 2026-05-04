@@ -1,6 +1,6 @@
 import os
 import time
-from models import YOLOW, VitSam
+from models import SAM3Detector
 import spacy
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -35,8 +35,9 @@ class Loader:
         os.makedirs(self._DUMP_DIR, exist_ok=True)
         self._MASKED_SCANS_DIR = self
 
-        self._yolow_model = YOLOW(self._YOLOW_PATH)
-        self._vit_sam_model = VitSam(self._ENCODER_PATH, self._DECODER_PATH) 
+        self._sam3_model = SAM3Detector()
+        self._yolow_model = None
+        self._vit_sam_model = None
 
         self._nlp = spacy.load("en_core_web_sm") 
         self._wv = api.load('word2vec-google-news-300') 
@@ -72,6 +73,14 @@ class Loader:
     @vit_sam_model.setter
     def vit_sam_model(self, value):
         self._vit_sam_model = value
+
+    @property
+    def sam3_model(self):
+        return self._sam3_model
+    
+    @sam3_model.setter
+    def sam3_model(self, value):
+        self._sam3_model = value
         
     @property
     def CONFIG(self):

@@ -20,22 +20,21 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def _resolve_api_key(yaml_value, env_var: str):
-    """Use YAML key if set to a non-placeholder value, else ``os.environ[env_var]``."""
-    if yaml_value is None:
-        return os.environ.get(env_var)
-    s = str(yaml_value).strip()
-    if not s or s == "...":
-        return os.environ.get(env_var)
-    return s
+def _resolve_api_key(env_var: str) -> str:
+    """Read an API key from the environment."""
+    api_key = os.environ.get(env_var, "").strip()
+    if not api_key:
+        raise RuntimeError(
+            f"{env_var} is not set. Export it before running Empower."
+        )
+    return api_key
 
 
-def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = False):
+def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     """Instantiate a LangChain chat model for *provider*.
 
     Args:
         provider:   "openai" or "mixtral"
-        master_cfg: contents of configs/llm_config.yaml
         llm_cfg:    contents of configs/llm/<provider>.yaml
         vision:     True  → use the vision-capable model variant
                     False → use the text-only planning model variant
@@ -44,7 +43,7 @@ def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = Fa
     model_name = llm_cfg[model_key]
 
     if provider == "openai":
-        api_key = _resolve_api_key(master_cfg.get("openai_api_key"), "OPENAI_API_KEY")
+        api_key = _resolve_api_key("OPENAI_API_KEY")
         kwargs = dict(
             model=model_name,
             api_key=api_key,
@@ -56,7 +55,7 @@ def _build_llm(provider: str, master_cfg: dict, llm_cfg: dict, vision: bool = Fa
         return ChatOpenAI(**kwargs)
 
     elif provider == "mixtral":
-        api_key = _resolve_api_key(master_cfg.get("mistral_api_key"), "MISTRAL_API_KEY")
+        api_key = _resolve_api_key("MISTRAL_API_KEY")
         return ChatMistralAI(
             model=model_name,
             api_key=api_key,
@@ -129,8 +128,9 @@ class Agents:
 
     Supports OpenAI (GPT-4o) and Mixtral (via Mistral AI API / Pixtral for vision).
     The active provider and model parameters are read from:
-        configs/llm_config.yaml      — provider selection & API keys
+        configs/llm_config.yaml      — provider selection
         configs/llm/<provider>.yaml  — model-specific parameters
+    API keys are read from OPENAI_API_KEY or MISTRAL_API_KEY environment variables.
 
     Args:
         image:            Base64-encoded JPEG from the robot's camera.
@@ -154,8 +154,8 @@ class Agents:
 
         # Two LLM instances: one with vision for scene understanding, one text-only for planning.
         # For OpenAI the same model handles both; for Mixtral, Pixtral handles vision.
-        self._vision_llm = _build_llm(self.provider, master_cfg, llm_cfg, vision=True)
-        self._text_llm = _build_llm(self.provider, master_cfg, llm_cfg, vision=False)
+        self._vision_llm = _build_llm(self.provider, llm_cfg, vision=True)
+        self._text_llm = _build_llm(self.provider, llm_cfg, vision=False)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -39,6 +39,10 @@ To download the pre-trained weights and the encoder and decoder ONNX models foll
 After the download, put the models and weights in the ```config/efficientvitsam/``` directory.
 For our tests, we used the ```l2``` model.
 
+### REPLACING YOLO-World with SAM3
+Empower uses SAM3 for prompt-conditioned detection and segmentation. Request access to the gated `facebook/sam3` Hugging Face repo, then either export `HF_TOKEN` before setup/run or set `EMPOWER_SAM3_CHECKPOINT=/path/to/sam3.pt`.
+
+
 ## Spacy
 ```python -m spacy download en_core_web_sm```
 
@@ -56,13 +60,14 @@ then install the dependencies
 
 ```
 pip install -r requirements.txt
-mim install mmcv==2.0.0 
-mim install mmyolo mmdet
+pip install -e ../sam3
 ```
 
-Also, set your OpenAI API key:
+Also, set the API key for the LLM provider you configured in `configs/llm_config.yaml`:
 ```
 conda env config vars set OPENAI_API_KEY=<YOUR API KEY>
+# or
+conda env config vars set MISTRAL_API_KEY=<YOUR API KEY>
 ```
 
 # Usage

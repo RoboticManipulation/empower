@@ -10,24 +10,27 @@ cd /home/$USER/ws/packages/empower
 ./set_up_empower
 ```
 
-This uses the container's default Python 3.10 and keeps the devcontainer Torch stack intact. YOLO-World runs through the Ultralytics backend instead of OpenMMLab/MMCV, and EfficientViT-SAM model files are fetched under `config/`. It does not use conda or a separate Python virtual environment.
+This uses the container's default Python 3.10 and keeps the devcontainer Torch stack intact. Detection runs through SAM3, with the gated `facebook/sam3` checkpoint resolved through Hugging Face or `EMPOWER_SAM3_CHECKPOINT`. It does not use conda or a separate Python virtual environment.
 
 Useful rerun options:
 
 ```bash
 EMPOWER_INSTALL_DEPS=0 ./set_up_empower       # only create folders/download missing weights
 EMPOWER_DOWNLOAD_WEIGHTS=0 ./set_up_empower  # only install/verify Python dependencies
-EMPOWER_YOLOW_MODEL=yolov8s-worldv2.pt ./set_up_empower  # optional smaller YOLO-World model
+EMPOWER_SAM3_CHECKPOINT=/path/to/sam3.pt ./set_up_empower  # optional local SAM3 checkpoint
 ```
 
 ---
 
-## Step 2 — LLM API keys
+## Step 2 — LLM provider and API key
 
-Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"` or `"mixtral"`), then either:
+Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"` or `"mixtral"`), then export the matching API key:
 
-- set `openai_api_key` / `mistral_api_key` in that file, or  
-- leave them as `""` and export **`OPENAI_API_KEY`** or **`MISTRAL_API_KEY`** in your shell (see comments in that YAML).
+```bash
+export OPENAI_API_KEY=<YOUR API KEY>
+# or
+export MISTRAL_API_KEY=<YOUR API KEY>
+```
 
 ---
 
