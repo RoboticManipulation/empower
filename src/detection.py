@@ -203,216 +203,23 @@ class Detection:
             descriptions[self.normalize_object_name(canonical_name)] = object_desc
         return descriptions
 
-    def unique_preserve_order(self, values):
-        seen = set()
-        unique = []
-        for value in values:
-            value = re.sub(r"\s+", " ", value.strip().lower())
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            unique.append(value)
-        return unique
-
-    def get_prompt_tokens(self, object_name):
-        normalized = self.normalize_object_name(object_name)
-        tokens = normalized.split()
-        stopwords = {
-            "a",
-            "an",
-            "and",
-            "for",
-            "in",
-            "it",
-            "of",
-            "on",
-            "the",
-            "to",
-            "with",
-        }
-        cleaned = []
-        for token in tokens:
-            if token.endswith("'s"):
-                continue
-            if token in stopwords:
-                continue
-            cleaned.append(token)
-        return cleaned
-
-    def get_sam3_prompt_aliases(self, object_name, relation_descriptors=None):
-        tokens = self.get_prompt_tokens(object_name)
-        if not tokens:
-            return []
-
-        category_heads = {
-            "bag",
-            "basket",
-            "bin",
-            "book",
-            "bottle",
-            "bowl",
-            "box",
-            "cabinet",
-            "can",
-            "carton",
-            "container",
-            "cup",
-            "dish",
-            "jacket",
-            "jar",
-            "mug",
-            "package",
-            "packet",
-            "plate",
-            "roll",
-            "shelf",
-            "spray",
-            "tray",
-        }
-        generic_container_heads = {
-            "bag",
-            "basket",
-            "bin",
-            "bottle",
-            "box",
-            "can",
-            "carton",
-            "container",
-            "jar",
-            "package",
-            "packet",
-        }
-        visual_descriptors = {
-            "black",
-            "blue",
-            "brown",
-            "clear",
-            "dark",
-            "gray",
-            "green",
-            "grey",
-            "large",
-            "light",
-            "metal",
-            "orange",
-            "paper",
-            "plastic",
-            "purple",
-            "red",
-            "small",
-            "tall",
-            "transparent",
-            "white",
-            "wood",
-            "wooden",
-            "yellow",
-        }
-
-        head_index = len(tokens) - 1
-        for index in range(len(tokens) - 1, -1, -1):
-            if tokens[index] in category_heads:
-                head_index = index
-                break
-
-        head = tokens[head_index]
-        aliases = []
-
-        for start in range(0, head_index):
-            phrase_tokens = tokens[start : head_index + 1]
-            if len(phrase_tokens) >= 2:
-                aliases.append(" ".join(phrase_tokens))
-
-        for token in tokens[:head_index]:
-            aliases.append(f"{token} {head}")
-
-        descriptors = [token for token in tokens[:head_index] if token in visual_descriptors]
-        for descriptor in descriptors:
-            aliases.append(f"{descriptor} {head}")
-        if len(descriptors) >= 2:
-            aliases.append(" ".join(descriptors + [head]))
-
-        if head not in generic_container_heads:
-            aliases.append(head)
-
-        relation_descriptors = relation_descriptors or set()
-        positional_aliases = []
-        for descriptor in sorted(relation_descriptors):
-            for alias in aliases:
-                alias_tokens = alias.split()
-                if len(alias_tokens) <= 3:
-                    positional_aliases.append(f"{descriptor} {alias}")
-            positional_aliases.append(f"{descriptor} {head}")
-        aliases.extend(positional_aliases)
-
-        return self.unique_preserve_order(aliases)
-
-    def get_relation_prompt_descriptors(self, object_relations):
-        descriptors = {}
-        for relation in object_relations:
-            parts = self.extract_relation_parts(relation)
-            if not parts:
-                continue
-
-            object_first, relation_type, object_second = parts
-            first_key = self.normalize_object_name(object_first)
-            second_key = self.normalize_object_name(object_second)
-            relation_type = relation_type.lower()
-
-            if "left" in relation_type:
-                descriptors.setdefault(first_key, set()).add("left")
-                descriptors.setdefault(second_key, set()).add("right")
-            elif "right" in relation_type:
-                descriptors.setdefault(first_key, set()).add("right")
-                descriptors.setdefault(second_key, set()).add("left")
-            elif "front" in relation_type:
-                descriptors.setdefault(first_key, set()).add("front")
-                descriptors.setdefault(second_key, set()).add("back")
-            elif "behind" in relation_type or "back" in relation_type:
-                descriptors.setdefault(first_key, set()).add("back")
-                descriptors.setdefault(second_key, set()).add("front")
-
-        for object_key, object_descriptors in descriptors.items():
-            if {"left", "right"}.issubset(object_descriptors):
-                object_descriptors.discard("left")
-                object_descriptors.discard("right")
-            if {"front", "back"}.issubset(object_descriptors):
-                object_descriptors.discard("front")
-                object_descriptors.discard("back")
-
-        return descriptors
-
     def get_detection_prompts(self, object_relations, planning_text):
         prompts = []
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
-        relation_descriptors = self.get_relation_prompt_descriptors(object_relations)
 
         for object_name in scene_objects:
             canonical_name = object_name.strip()
             canonical_key = self.normalize_object_name(canonical_name)
             aliases = [canonical_name]
             object_desc = object_descriptions.get(canonical_key)
-            canonical_descriptors = relation_descriptors.get(canonical_key, set())
 
             if object_desc:
                 aliases.append(object_desc)
                 if " of " in object_desc.lower():
                     container, described_name = object_desc.split(" of ", 1)
                     aliases.append(f"{described_name.strip()} {container.strip()}")
-            aliases.extend(
-                self.get_sam3_prompt_aliases(
-                    canonical_name,
-                    relation_descriptors=canonical_descriptors,
-                )
-            )
-            if object_desc:
-                aliases.extend(
-                    self.get_sam3_prompt_aliases(
-                        object_desc,
-                        relation_descriptors=canonical_descriptors,
-                    )
-                )
 
             for alias in aliases:
                 alias = alias.strip()
@@ -489,23 +296,6 @@ class Detection:
         union = np.logical_or(mask_a, mask_b).sum()
         return 0.0 if union == 0 else intersection / union
 
-    def sam3_rank_score(self, score, prompt_label, canonical_label):
-        prompt = self.normalize_object_name(prompt_label)
-        canonical = self.normalize_object_name(canonical_label)
-        rank_score = float(score)
-
-        if prompt == canonical:
-            rank_score += 0.45
-        elif prompt and (prompt in canonical or canonical in prompt):
-            rank_score += 0.10
-
-        prompt_tokens = prompt.split()
-        if prompt_tokens and prompt_tokens[0] in {"left", "right", "front", "back"}:
-            rank_score += 0.20
-
-        rank_score += min(len(prompt_tokens), 5) * 0.005
-        return rank_score
-
     def sam3_detections(self, sam3_results, prompt_to_canonical):
         candidates = []
         max_per_object = int(os.environ.get("EMPOWER_SAM3_MAX_PER_OBJECT", "1"))
@@ -528,14 +318,13 @@ class Detection:
                 {
                     "bbox": bbox.astype(np.float32),
                     "score": float(score),
-                    "rank_score": self.sam3_rank_score(score, prompt_label, label),
                     "label": label,
                     "mask": mask,
                     "prompt": prompt_label,
                 }
             )
 
-        candidates.sort(key=lambda item: item["rank_score"], reverse=True)
+        candidates.sort(key=lambda item: item["score"], reverse=True)
         kept = []
         label_counts = {}
         for candidate in candidates:
@@ -570,25 +359,35 @@ class Detection:
             return
     
         if "on" in relation:
-            min_distance_x = 30000
+            min_distance = 30000
+            index_first = None
+            index_second = None
             for key_first in position_in_image_first.keys():
                 for key_second in position_in_image_second.keys():
+                    if key_first == key_second:
+                        continue
                     dis_x = abs(position_in_image_first[key_first]['x'] - position_in_image_second[key_second]['x'])
                     dis_y = abs(position_in_image_first[key_first]['y'] - position_in_image_second[key_second]['y'])
                     distance = math.sqrt((dis_x*dis_x + dis_y*dis_y))
-                    if min_distance_x > dis_y:
+                    if min_distance > distance:
                         index_first = key_first
                         index_second = key_second
-                        min_distance_x = distance
+                        min_distance = distance
 
+            if index_first is None or index_second is None:
+                return
             self.data_reordered[index_first]['label'] = object_first
             self.data_reordered[index_second]['label'] = object_second
        
         if "left" in relation:
             min_distance_x = 30000
             min_distance_y = 10000
+            index_first = None
+            index_second = None
             for key_first in position_in_image_first.keys():
                 for key_second in position_in_image_second.keys():
+                    if key_first == key_second:
+                        continue
                     min_distance_x_bb = abs(position_in_image_first[key_first]['x'] - position_in_image_second[key_second]['x'])//2
                     min_distance_y_bb = abs(position_in_image_first[key_first]['y'] - position_in_image_second[key_second]['y'])//2
                     if min_distance_x_bb < min_distance_x and min_distance_x_bb != 0 and min_distance_y > min_distance_y_bb :
@@ -597,28 +396,36 @@ class Detection:
                         min_distance_x = min_distance_x_bb
                         min_distance_y = min_distance_y_bb
 
+            if index_first is None or index_second is None:
+                return
             self.data_reordered[index_first]['label'] = object_first
             self.data_reordered[index_second]['label'] = object_second
-            self.dict_detections.pop(index_first)
-            self.dict_detections.pop(index_second)
+            self.dict_detections.pop(index_first, None)
+            self.dict_detections.pop(index_second, None)
 
         if "right" in relation:
             min_distance_x = 30000
             min_distance_y = 10000
+            index_first = None
+            index_second = None
             for key_first in position_in_image_first.keys():
                 for key_second in position_in_image_second.keys():
+                    if key_first == key_second:
+                        continue
                     min_distance_x_bb = abs(position_in_image_first[key_first]['x'] - position_in_image_second[key_second]['x'])//2
                     min_distance_y_bb = abs(position_in_image_first[key_first]['y'] - position_in_image_second[key_second]['y'])//2
-                    if min_distance_x_bb < min_distance_x and min_distance_x_bb != 0 and min_distance_y > min_distance_y_bb and min_distance_y_bb != 0:
+                    if min_distance_x_bb < min_distance_x and min_distance_x_bb != 0 and min_distance_y > min_distance_y_bb:
                         
                         index_first = key_first
                         index_second = key_second
                         min_distance_x = min_distance_x_bb
                         min_distance_y = min_distance_y_bb
+            if index_first is None or index_second is None:
+                return
             self.data_reordered[index_first]['label'] = object_first
             self.data_reordered[index_second]['label'] = object_second
-            self.dict_detections.pop(index_first)
-            self.dict_detections.pop(index_second)
+            self.dict_detections.pop(index_first, None)
+            self.dict_detections.pop(index_second, None)
 
         
 
@@ -674,7 +481,7 @@ class Detection:
             if re.match(r"rgb_[0-9]+\.jpg$", filename):
                 os.remove(os.path.join(self.loader_instance.DUMP_DIR, filename))
 
-        score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.5"))
+        score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.3"))
         self.loader_instance.sam3_model.set_class_name(prompt_labels)
         sam3_results = self.loader_instance.sam3_model.detect(
             image_path,

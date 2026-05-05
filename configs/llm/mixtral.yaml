@@ -11,7 +11,7 @@ model: "open-mixtral-8x22b"        # str — alternatives: "open-mixtral-8x7b",
 # Vision agents — requires a multimodal Mistral model (Pixtral family)
 
 # model: "mistral-small-2506" # str ["mistral-large-latest", "mistral-medium-2508", "mistral-medium-2508"]
-vision_model: "mistral-small-2506" #"pixtral-12b-2409"   # str — alternatives: "pixtral-large-2411"
+vision_model: "mistral-large-2512" #"pixtral-12b-2409"   # str — alternatives: "pixtral-large-2411"
                                    # NOTE: standard Mixtral models are text-only;
                                    # Pixtral is used automatically for image tasks.
 
