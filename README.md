@@ -68,6 +68,8 @@ Also, set the API key for the LLM provider you configured in `configs/llm_config
 conda env config vars set OPENAI_API_KEY=<YOUR API KEY>
 # or
 conda env config vars set MISTRAL_API_KEY=<YOUR API KEY>
+# or
+conda env config vars set OPENROUTER_API_KEY=<YOUR API KEY>
 ```
 
 # Usage

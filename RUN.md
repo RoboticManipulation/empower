@@ -24,12 +24,14 @@ EMPOWER_SAM3_CHECKPOINT=/path/to/sam3.pt ./set_up_empower  # optional local SAM3
 
 ## Step 2 — LLM provider and API key
 
-Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"` or `"mixtral"`), then export the matching API key:
+Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"`, `"mixtral"`, or `"openrouter"`), then export the matching API key:
 
 ```bash
 export OPENAI_API_KEY=<YOUR API KEY>
 # or
 export MISTRAL_API_KEY=<YOUR API KEY>
+# or
+export OPENROUTER_API_KEY=<YOUR API KEY>
 ```
 
 ---

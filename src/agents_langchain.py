@@ -13,6 +13,7 @@ from langchain_mistralai import ChatMistralAI
 
 _ROOT = Path(__file__).resolve().parent.parent
 _MASTER_CFG_PATH = _ROOT / "configs" / "llm_config.yaml"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _load_yaml(path: Path) -> dict:
@@ -34,7 +35,7 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     """Instantiate a LangChain chat model for *provider*.
 
     Args:
-        provider:   "openai" or "mixtral"
+        provider:   "openai", "mixtral", or "openrouter"
         llm_cfg:    contents of configs/llm/<provider>.yaml
         vision:     True  → use the vision-capable model variant
                     False → use the text-only planning model variant
@@ -51,7 +52,22 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
             temperature=llm_cfg["temperature"],
         )
         if "seed" in llm_cfg:
-            kwargs["model_kwargs"] = {"seed": llm_cfg["seed"]}
+            kwargs["seed"] = llm_cfg["seed"]
+        return ChatOpenAI(**kwargs)
+
+    elif provider == "openrouter":
+        api_key = _resolve_api_key("OPENROUTER_API_KEY")
+        kwargs = dict(
+            model=model_name,
+            api_key=api_key,
+            base_url=llm_cfg.get("base_url", _OPENROUTER_BASE_URL),
+        )
+        if "max_tokens" in llm_cfg:
+            kwargs["max_tokens"] = llm_cfg["max_tokens"]
+        if "temperature" in llm_cfg:
+            kwargs["temperature"] = llm_cfg["temperature"]
+        if "seed" in llm_cfg:
+            kwargs["seed"] = llm_cfg["seed"]
         return ChatOpenAI(**kwargs)
 
     elif provider == "mixtral":
@@ -66,7 +82,8 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     else:
         raise ValueError(
             f"Unsupported provider: '{provider}'. "
-            "Set llm_provider to 'openai' or 'mixtral' in configs/llm_config.yaml."
+            "Set llm_provider to 'openai', 'mixtral', or 'openrouter' "
+            "in configs/llm_config.yaml."
         )
 
 
@@ -126,11 +143,13 @@ _ROBOT_CONTEXT = (
 class Agents:
     """LangChain-based robot task-planning agents.
 
-    Supports OpenAI (GPT-4o) and Mixtral (via Mistral AI API / Pixtral for vision).
+    Supports OpenAI (GPT-4o), Mixtral (via Mistral AI API / Pixtral for vision),
+    and OpenRouter's OpenAI-compatible API.
     The active provider and model parameters are read from:
         configs/llm_config.yaml      — provider selection
         configs/llm/<provider>.yaml  — model-specific parameters
-    API keys are read from OPENAI_API_KEY or MISTRAL_API_KEY environment variables.
+    API keys are read from OPENAI_API_KEY, MISTRAL_API_KEY, or OPENROUTER_API_KEY
+    environment variables.
 
     Args:
         image:            Base64-encoded JPEG from the robot's camera.

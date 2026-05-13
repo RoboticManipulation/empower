@@ -1,0 +1,10 @@
+######################################################################
+# OpenRouter - OpenAI GPT-5.5
+######################################################################
+
+model: "openai/gpt-5.5"        # planning agent (text only)
+vision_model: "openai/gpt-5.5" # vision agents (image + text)
+base_url: "https://openrouter.ai/api/v1"
+max_tokens: 1000
+seed: 7
+

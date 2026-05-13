@@ -15,12 +15,14 @@ This creates the `empower` conda environment (if missing), installs Python depen
 
 ## Step 2 — LLM provider and API key
 
-Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"` or `"mixtral"`), then store the matching API key in the conda environment:
+Edit `configs/llm_config.yaml` and set `llm_provider` (`"openai"`, `"mixtral"`, or `"openrouter"`), then store the matching API key in the conda environment:
 
 ```bash
 conda env config vars set OPENAI_API_KEY=<YOUR API KEY>
 # or
 conda env config vars set MISTRAL_API_KEY=<YOUR API KEY>
+# or
+conda env config vars set OPENROUTER_API_KEY=<YOUR API KEY>
 ```
 
 ---

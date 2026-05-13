@@ -185,3 +185,4 @@ output/
 rosbags/
 config/yolow/*
 configs/llm_config.yaml
+geo_sem_place_dataset

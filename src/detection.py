@@ -8,6 +8,10 @@ import math
 import os
 import re
 from agents_langchain import Agents
+from semantic_placement_grounding import get_semantic_grasp_object
+from semantic_placement_grounding import run_grounded_semantic_placement
+from semantic_placement_grounding import semantic_placement_prompt_objects
+from semantic_placement_grounding import semantic_placement_task_description
 
 class Detection:
 
@@ -18,6 +22,10 @@ class Detection:
         task_description_shelf = "move the objects in the shelf in order to have for each level of the shelf only the objects made of the same material"
         task_description_shelf2 = "move the objects in the shelf in order to have exactly two objects for level"
         task_description_jacket = "give me the green jacket from the clothing rack"
+        task_description_semantic_placement = (
+            "place the grasped object where it semantically belongs in the scene, "
+            "to the left or right of a similar visible object when open shelf space is visible"
+        )
 
         self.task_dict = {
             "order_by_height": task_description_order,
@@ -25,7 +33,8 @@ class Detection:
             "shelf_number": task_description_shelf2,
             "shelf_material": task_description_shelf,
             "recycle": task_description_diff,
-            "jacket": task_description_jacket
+            "jacket": task_description_jacket,
+            "semantic_placement": task_description_semantic_placement
         }
     
     def run_experiment(self):
@@ -34,7 +43,13 @@ class Detection:
         with open(image_path, "rb") as im_file:
             encoded_image = base64.b64encode(im_file.read()).decode("utf-8")
 
-        agents = Agents(encoded_image, self.task_dict[use_case])
+        task_description = self.task_dict[use_case]
+        if use_case == "semantic_placement":
+            task_description = semantic_placement_task_description(
+                get_semantic_grasp_object(self.loader_instance, required=True)
+            )
+
+        agents = Agents(encoded_image, task_description)
         # self.single_agent_info = agents.single_agent() 
 
         environment_agent_info, description_agent_info, planning_agent_info = agents.multi_agent_vision_planning()
@@ -56,6 +71,8 @@ class Detection:
         self.loader_instance = loader_instance
         self.run_experiment()
         self.run_image(image_path=self.loader_instance.SCAN_DIR+"scan.jpg")
+        if self.loader_instance.use_case == "semantic_placement":
+            self.run_semantic_placement()
         
     def split_word(self,words):
         splitted_word = []
@@ -159,6 +176,19 @@ class Detection:
             "recycling bin",
         }
 
+    def is_action_label(self, name):
+        normalized = self.normalize_object_name(name)
+        if not normalized:
+            return False
+        return normalized.split()[0] in {
+            "drop",
+            "grab",
+            "place",
+            "navigate",
+            "push",
+            "pull",
+        }
+
     def is_structural_label(self, name):
         normalized = self.normalize_object_name(name)
         if "shelf" in normalized:
@@ -182,7 +212,7 @@ class Detection:
             if not parts:
                 continue
             for obj_name in (parts[0], parts[2]):
-                if self.is_support_object(obj_name):
+                if self.is_support_object(obj_name) or self.is_action_label(obj_name):
                     continue
                 key = self.normalize_object_name(obj_name)
                 if key and key not in seen:
@@ -208,6 +238,23 @@ class Detection:
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
+        if getattr(self.loader_instance, "use_case", "") == "semantic_placement":
+            grasp_object = get_semantic_grasp_object(
+                self.loader_instance,
+                required=False,
+            )
+            scene_keys = {
+                self.normalize_object_name(object_name)
+                for object_name in scene_objects
+            }
+            for object_name in semantic_placement_prompt_objects(
+                planning_text=planning_text,
+                grasp_object=grasp_object,
+            ):
+                object_key = self.normalize_object_name(object_name)
+                if object_key and object_key not in scene_keys:
+                    scene_keys.add(object_key)
+                    scene_objects.append(object_name)
 
         for object_name in scene_objects:
             canonical_name = object_name.strip()
@@ -298,7 +345,14 @@ class Detection:
 
     def sam3_detections(self, sam3_results, prompt_to_canonical):
         candidates = []
-        max_per_object = int(os.environ.get("EMPOWER_SAM3_MAX_PER_OBJECT", "1"))
+        default_max_per_object = (
+            "3"
+            if getattr(self.loader_instance, "use_case", "") == "semantic_placement"
+            else "1"
+        )
+        max_per_object = int(
+            os.environ.get("EMPOWER_SAM3_MAX_PER_OBJECT", default_max_per_object)
+        )
         boxes = sam3_results["boxes"]
         scores = sam3_results["scores"]
         class_ids = sam3_results["class_ids"]
@@ -312,7 +366,7 @@ class Detection:
                 self.normalize_object_name(prompt_label),
                 prompt_label,
             )
-            if self.is_structural_label(label):
+            if self.is_structural_label(label) or self.is_action_label(label):
                 continue
             candidates.append(
                 {
@@ -535,7 +589,7 @@ class Detection:
         # print("mask : " + str(i) + " : " + str(time.time() -start))
         cv2.imwrite(self.loader_instance.DUMP_DIR+"mask.jpg", overlay_)
         cv2.imwrite(self.loader_instance.DUMP_DIR+"sam3.jpg", image_sam3)
-        cv2.imwrite(self.loader_instance.DUMP_DIR+"yolo.jpg", image_sam3)
+        # cv2.imwrite(self.loader_instance.DUMP_DIR+"yolo.jpg", image_sam3)
 
         self.data_reordered = self.dict_detections.copy()
         # start = time.time()
@@ -547,6 +601,13 @@ class Detection:
                 continue
 
             relation_object_first, relation_type, relation_object_second = parts
+            if (
+                self.is_action_label(relation_object_first)
+                or self.is_action_label(relation_object_second)
+            ):
+                skipped_relations += 1
+                continue
+
             index_bounding_box_first = self.find_bb_relation(relation_object_first)
             index_bounding_box_second = self.find_bb_relation(relation_object_second)
             if index_bounding_box_first != [] or index_bounding_box_second != []:
@@ -563,3 +624,10 @@ class Detection:
             pickle.dump(self.data_reordered, f, protocol=2)
         
         cv2.imwrite(self.loader_instance.DUMP_DIR+"scan_with_bb.jpg", image_with_bbox)
+
+    def run_semantic_placement(self):
+        self.semantic_placement_result = run_grounded_semantic_placement(
+            loader_instance=self.loader_instance,
+            results_multi=self.results_multi,
+            detections=self.data_reordered,
+        )

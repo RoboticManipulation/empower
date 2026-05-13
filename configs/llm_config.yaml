@@ -2,9 +2,10 @@
 # Master LLM Configuration
 # =============================================================================
 # Select which LLM provider to use for the agents.
-# Options: "openai" | "mixtral"
+# Options: "openai" | "mixtral" | "openrouter"
 llm_provider: "mixtral"
 
 # API keys are read from environment variables only:
 #   OpenAI  → OPENAI_API_KEY
 #   Mixtral → MISTRAL_API_KEY
+#   OpenRouter -> OPENROUTER_API_KEY
