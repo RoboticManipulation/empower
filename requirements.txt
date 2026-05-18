@@ -32,3 +32,5 @@ spacy
 gensim
 openmim
 open3d
+ultralytics
+git+https://github.com/ultralytics/CLIP.git

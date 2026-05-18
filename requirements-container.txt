@@ -34,4 +34,6 @@ gensim
 open3d
 scikit-learn
 numpy>=1.24,<2
+ultralytics
+git+https://github.com/ultralytics/CLIP.git
 tomli; python_version < "3.11"

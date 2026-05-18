@@ -12,6 +12,7 @@ import open3d as o3d
 
 from semantic_placement_wrapper import run_semantic_placement
 from semantic_placement_wrapper import DEFAULT_FRAME_ID
+from semantic_placement_wrapper import DEFAULT_DETECTOR_BACKEND
 
 
 def main() -> None:
@@ -23,6 +24,7 @@ def main() -> None:
         pointcloud_path=args.pointcloud,
         camera_info_path=args.camera_info,
         frame_id=args.frame_id,
+        detector_backend=args.detector_backend,
         images_root=args.images_root,
         output_root=args.output_root,
     )
@@ -92,6 +94,13 @@ def _parse_args() -> argparse.Namespace:
         "--frame-id",
         default=DEFAULT_FRAME_ID,
         help="Frame label for the returned coordinate",
+    )
+    parser.add_argument(
+        "--detector-backend",
+        "--detector",
+        choices=("sam3", "yolow"),
+        default=DEFAULT_DETECTOR_BACKEND,
+        help="Prompt-conditioned detector backend to use for grounding",
     )
     parser.add_argument(
         "--images-root",

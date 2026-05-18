@@ -399,6 +399,97 @@ class Detection:
                 label_counts[label_key] = label_counts.get(label_key, 0) + 1
         return kept
 
+    def yolow_detections(self, yolow_results, prompt_to_canonical, image_shape):
+        candidates = []
+        boxes, scores, class_ids = yolow_results
+        if isinstance(boxes, (list, tuple)):
+            boxes = boxes[0]
+
+        for bbox, score, class_id in zip(boxes, scores, class_ids):
+            prompt_label = self.loader_instance.yolow_model.get_class_name(class_id)
+            if not prompt_label:
+                continue
+            label = prompt_to_canonical.get(
+                self.normalize_object_name(prompt_label),
+                prompt_label,
+            )
+            if self.is_structural_label(label) or self.is_action_label(label):
+                continue
+            candidates.append(
+                {
+                    "bbox": np.asarray(bbox, dtype=np.float32),
+                    "score": float(score),
+                    "label": label,
+                    "mask": self.bbox_mask(bbox, image_shape),
+                    "prompt": prompt_label,
+                }
+            )
+
+        return candidates
+
+    def bbox_mask(self, bbox, image_shape):
+        height, width = image_shape[:2]
+        x1, y1, x2, y2 = np.asarray(bbox, dtype=float)
+        x1 = int(max(0, min(width - 1, round(x1))))
+        x2 = int(max(0, min(width, round(x2))))
+        y1 = int(max(0, min(height - 1, round(y1))))
+        y2 = int(max(0, min(height, round(y2))))
+        mask = np.zeros((height, width), dtype=bool)
+        if x2 > x1 and y2 > y1:
+            mask[y1:y2, x1:x2] = True
+        return mask
+
+    def detector_backend(self):
+        backend = getattr(self.loader_instance, "detector_backend", "sam3")
+        backend = str(backend or "sam3").strip().lower()
+        if backend in {"yolo", "yolo-world", "yolo_world", "yoloworld", "yolow"}:
+            return "yolow"
+        if backend in {"sam", "sam3"}:
+            return "sam3"
+        raise ValueError("detector_backend must be one of: sam3, yolow")
+
+    def run_detector(self, image_path, image, prompt_labels, prompt_to_canonical):
+        backend = self.detector_backend()
+        if backend == "sam3":
+            score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.3"))
+            self.loader_instance.sam3_model.set_class_name(prompt_labels)
+            sam3_results = self.loader_instance.sam3_model.detect(
+                image_path,
+                max_num_boxes=100,
+                score_thr=score_thr,
+                nms_thr=0.5,
+            )
+            detections = self.sam3_detections(sam3_results, prompt_to_canonical)
+            print(
+                f"[DEBUG] SAM3 raw detections: {len(sam3_results['scores'])} masks, "
+                f"kept after canonical dedupe: {len(detections)}"
+            )
+            return backend, score_thr, detections
+
+        from models import YOLOW
+
+        if self.loader_instance.yolow_model is None:
+            self.loader_instance.yolow_model = YOLOW(self.loader_instance.YOLOW_PATH)
+
+        score_thr = float(os.environ.get("EMPOWER_YOLOW_SCORE_THR", "0.05"))
+        self.loader_instance.yolow_model.set_class_name(prompt_labels)
+        yolow_results = self.loader_instance.yolow_model(
+            image_path,
+            max_num_boxes=100,
+            score_thr=score_thr,
+            nms_thr=0.5,
+        )
+        detections = self.yolow_detections(
+            yolow_results,
+            prompt_to_canonical,
+            image.shape,
+        )
+        print(
+            f"[DEBUG] YOLOW raw detections: {len(yolow_results[1])} boxes, "
+            f"kept after filtering: {len(detections)}"
+        )
+        return backend, score_thr, detections
+
     def find_bb_relation(self,relation_object):
         index_ = []
         target = self.normalize_object_name(relation_object)
@@ -521,32 +612,30 @@ class Detection:
             object_relations,
             self.results_multi.get("planning_agent_info", ""),
         )
-        print(f"[DEBUG] SAM3 labels: {prompt_labels}")
+        backend = self.detector_backend()
+        print(f"[DEBUG] {backend.upper()} labels: {prompt_labels}")
 
         image = cv2.imread(image_path)
         if image is None:
             raise FileNotFoundError(f"Unable to read image: {image_path}")
         masked_image = image.copy()
         image_with_bbox = image.copy()
-        image_sam3 = image.copy()
+        image_detector = image.copy()
         self.dict_detections = {}
         overlay_ = masked_image 
+        detector_debug_images = {"sam3.jpg", "yolow.jpg", "yolo.jpg"}
         for filename in os.listdir(self.loader_instance.DUMP_DIR):
-            if re.match(r"rgb_[0-9]+\.jpg$", filename):
+            if (
+                re.match(r"rgb_[0-9]+\.jpg$", filename)
+                or filename in detector_debug_images
+            ):
                 os.remove(os.path.join(self.loader_instance.DUMP_DIR, filename))
 
-        score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.3"))
-        self.loader_instance.sam3_model.set_class_name(prompt_labels)
-        sam3_results = self.loader_instance.sam3_model.detect(
+        backend, score_thr, detections = self.run_detector(
             image_path,
-            max_num_boxes=100,
-            score_thr=score_thr,
-            nms_thr=0.5,
-        )
-        detections = self.sam3_detections(sam3_results, prompt_to_canonical)
-        print(
-            f"[DEBUG] SAM3 raw detections: {len(sam3_results['scores'])} masks, "
-            f"kept after canonical dedupe: {len(detections)}"
+            image,
+            prompt_labels,
+            prompt_to_canonical,
         )
 
         for detection in detections:
@@ -561,15 +650,16 @@ class Detection:
                     self.dict_detections[index_detection] = {'bbox':None,'label':None}
                     self.dict_detections[index_detection]['bbox'] = bbox
                     self.dict_detections[index_detection]['label'] = label
+                    self.dict_detections[index_detection]['score'] = score
                     cv2.rectangle(
-                        image_sam3,
+                        image_detector,
                         (int(x1), int(y1)),
                         (int(x2), int(y2)),
                         (255, 0, 0),
                         1,
                     )
                     cv2.putText(
-                        image_sam3,
+                        image_detector,
                         f"{label}: {score:.2f}",
                         (int(x1), int(y1)-10),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -588,8 +678,7 @@ class Detection:
         
         # print("mask : " + str(i) + " : " + str(time.time() -start))
         cv2.imwrite(self.loader_instance.DUMP_DIR+"mask.jpg", overlay_)
-        cv2.imwrite(self.loader_instance.DUMP_DIR+"sam3.jpg", image_sam3)
-        # cv2.imwrite(self.loader_instance.DUMP_DIR+"yolo.jpg", image_sam3)
+        cv2.imwrite(self.loader_instance.DUMP_DIR+f"{backend}.jpg", image_detector)
 
         self.data_reordered = self.dict_detections.copy()
         # start = time.time()

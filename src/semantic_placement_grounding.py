@@ -37,12 +37,7 @@ def run_grounded_semantic_placement(
         placement_pointcloud=placement_pointcloud,
     )
     grasp_object = get_semantic_grasp_object(loader_instance, required=True)
-    planning_text = plan_with_same_type_reference(
-        loader_instance=loader_instance,
-        planning_text=results_multi.get("planning_agent_info", ""),
-        grasp_object=grasp_object,
-        reference_positions=reference_positions,
-    )
+    planning_text = results_multi.get("planning_agent_info", "")
 
     result = get_semantic_placement_coordinates_from_plan(
         planning_text,
@@ -117,23 +112,19 @@ def semantic_placement_prompt_objects(
     planning_text: str,
     grasp_object: str | None,
 ) -> list[str]:
-    objects = []
-    if grasp_object:
-        objects.append(grasp_object)
-
     try:
         intent = parse_semantic_placement_plan(
             planning_text,
             default_grasp_object=grasp_object,
         )
     except ValueError:
-        return _unique_objects(objects)
+        return []
 
-    objects.append(intent.grasp_object)
-    if intent.reference_object:
-        objects.append(intent.reference_object)
-
-    return _unique_objects(objects)
+    # The grasp object is already held by the robot and is usually absent from
+    # the placement scene. Prompt the detector only for the visible reference
+    # named by the LLM plan; otherwise open-vocabulary detectors tend to force
+    # false positives for the held object.
+    return _unique_objects([intent.reference_object] if intent.reference_object else [])
 
 
 def _unique_objects(objects: list[str]) -> list[str]:
@@ -262,6 +253,7 @@ def get_semantic_reference_geometry(
         return {}
 
     reference_positions: dict[str, np.ndarray] = {}
+    reference_quality: dict[str, tuple[float, int]] = {}
     label_counts: dict[str, int] = {}
     min_points = int(os.environ.get("EMPOWER_SEMANTIC_MIN_OBJECT_POINTS", "25"))
 
@@ -291,8 +283,11 @@ def get_semantic_reference_geometry(
         if occurrence > 1:
             names.extend([f"{label} {occurrence}", f"{label}_{occurrence}"])
 
+        quality = (float(detection.get("score", 0.0) or 0.0), int(len(object_points)))
         for name in names:
-            reference_positions.setdefault(name, centroid)
+            if quality > reference_quality.get(name, (-1.0, -1)):
+                reference_positions[name] = centroid
+                reference_quality[name] = quality
 
     return reference_positions
 
@@ -391,11 +386,6 @@ def points_for_detection_mask(
     u = projection["u"][valid_indices]
     v = projection["v"][valid_indices]
     hits = valid_indices[mask_2d[v, u]]
-
-    flipped_mask = cv2.flip(mask_2d.astype(np.uint8), 1).astype(bool)
-    flipped_hits = valid_indices[flipped_mask[v, u]]
-    if len(flipped_hits) > len(hits):
-        hits = flipped_hits
 
     return points[hits]
 

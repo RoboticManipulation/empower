@@ -1,6 +1,5 @@
 import os
 import time
-from models import SAM3Detector
 import spacy
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -35,7 +34,7 @@ class Loader:
         os.makedirs(self._DUMP_DIR, exist_ok=True)
         self._MASKED_SCANS_DIR = self
 
-        self._sam3_model = SAM3Detector()
+        self._sam3_model = None
         self._yolow_model = None
         self._vit_sam_model = None
 
@@ -76,6 +75,10 @@ class Loader:
 
     @property
     def sam3_model(self):
+        if self._sam3_model is None:
+            from models import SAM3Detector
+
+            self._sam3_model = SAM3Detector()
         return self._sam3_model
     
     @sam3_model.setter

@@ -70,3 +70,53 @@ python3 execute_task.py
 cd src
 USE_CASE=order_by_height python3 color_pcl_local.py
 ```
+
+
+## Whole pipeline in one go
+
+Example with SAM3 (default):
+
+```bash
+bash -ic 'python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend sam3 \
+  --no-window \
+  --write-prefix output/semantic_placement_demo/ketchup_bottle_sam3'
+```
+
+Example with YOLO-World:
+
+```bash
+bash -ic 'python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend yolow \
+  --no-window \
+  --write-prefix output/semantic_placement_demo/ketchup_bottle_yolow'
+```
+
+
+For the two detector setups:
+
+  - SAM3: confidence threshold is 0.3
+      - Env override: EMPOWER_SAM3_SCORE_THR
+      - Code: src/detection.py:454
+  - YOLO-world: confidence threshold is 0.05
+      - Env override: EMPOWER_YOLOW_SCORE_THR
+      - Code: src/detection.py:474
+
+----
+ Current formula:
+
+  reference = centroid(reference object pointcloud)
+
+  left:
+    coordinate = [reference_x - 0.15, reference_y, reference_z]
+
+  right:
+    coordinate = [reference_x + 0.15, reference_y, reference_z]

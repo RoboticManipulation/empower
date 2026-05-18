@@ -1,9 +1,9 @@
 """Single-call semantic placement wrapper for Empower.
 
 The public entry point is ``run_semantic_placement``. It stages one placement
-scene, runs Empower's existing LLM + SAM grounding path through ``Detection``,
-and returns placement coordinates without ROS, MoveIt, CuRoBo, sockets, or
-multiple terminals.
+scene, runs Empower's existing LLM + detector grounding path through
+``Detection``, and returns placement coordinates without ROS, MoveIt, CuRoBo,
+sockets, or multiple terminals.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import numpy as np
 USE_CASE = "semantic_placement"
 DEFAULT_FRAME_ID = "gemini336_color_optical_frame"
 DEFAULT_RELATION_OFFSET_M = 0.15
+DEFAULT_DETECTOR_BACKEND = "sam3"
 
 
 def run_semantic_placement(
@@ -32,6 +33,7 @@ def run_semantic_placement(
     pointcloud_path: str | os.PathLike[str],
     camera_info_path: str | os.PathLike[str] | None = None,
     frame_id: str = DEFAULT_FRAME_ID,
+    detector_backend: str = DEFAULT_DETECTOR_BACKEND,
     use_case: str = USE_CASE,
     images_root: str | os.PathLike[str] | None = None,
     output_root: str | os.PathLike[str] | None = None,
@@ -65,6 +67,7 @@ def run_semantic_placement(
         dump_dir=dump_dir,
         grasp_object=str(grasp_object).strip(),
         frame_id=frame_id,
+        detector_backend=detector_backend,
     )
 
     _ensure_src_on_path()
@@ -303,7 +306,6 @@ def _apply_reference_relation(
     relation_offset_m: float,
 ) -> dict[str, Any]:
     updated = dict(result)
-    surface_position = dict(result["surface_position"])
     offset = abs(float(relation_offset_m))
 
     if relation == "left":
@@ -315,7 +317,6 @@ def _apply_reference_relation(
 
     surface = _candidate_surface_point(
         reference_position=reference_position,
-        surface_z=float(surface_position["z"]),
         direction=direction,
         preferred_offset_m=offset,
     )
@@ -338,15 +339,17 @@ def _apply_reference_relation(
 def _candidate_surface_point(
     *,
     reference_position: np.ndarray,
-    surface_z: float,
     direction: float,
     preferred_offset_m: float,
 ) -> np.ndarray:
+    # Coordinates are in gemini336_color_optical_frame. Matching original
+    # Empower behavior, left/right is applied as a fixed offset from the
+    # detector-derived reference object centroid.
     return np.array(
         [
             float(reference_position[0] + direction * preferred_offset_m),
             float(reference_position[1]),
-            surface_z,
+            float(reference_position[2]),
         ],
         dtype=float,
     )
@@ -423,6 +426,7 @@ def _build_semantic_loader(
     dump_dir: Path,
     grasp_object: str,
     frame_id: str,
+    detector_backend: str,
 ):
     _ensure_src_on_path()
     import loader
@@ -433,7 +437,26 @@ def _build_semantic_loader(
     loader_instance.DUMP_DIR = str(dump_dir) + os.sep
     loader_instance.grasp_object = grasp_object
     loader_instance.semantic_frame_id = frame_id
+    loader_instance.detector_backend = _coerce_detector_backend(detector_backend)
     return loader_instance
+
+
+def _coerce_detector_backend(detector_backend: str) -> str:
+    backend = str(detector_backend or DEFAULT_DETECTOR_BACKEND).strip().lower()
+    aliases = {
+        "sam": "sam3",
+        "sam3": "sam3",
+        "yolo": "yolow",
+        "yolo-world": "yolow",
+        "yolo_world": "yolow",
+        "yoloworld": "yolow",
+        "yolow": "yolow",
+    }
+    if backend not in aliases:
+        raise ValueError(
+            "detector_backend must be one of: sam3, yolow"
+        )
+    return aliases[backend]
 
 
 def _ensure_src_on_path() -> None:
@@ -718,6 +741,7 @@ def _normalize_reference_key(value: str) -> str:
 
 
 __all__ = [
+    "DEFAULT_DETECTOR_BACKEND",
     "DEFAULT_RELATION_OFFSET_M",
     "DEFAULT_FRAME_ID",
     "USE_CASE",
