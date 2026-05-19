@@ -1,96 +1,46 @@
-"""Reusable semantic placement wrapper for Empower.
-
-The public entry point is ``EmpowerSemanticPlacementWrapper``. It prepares
-Empower's loader, detection pipeline, and selected detector model once in
-``__init__``. Each ``run(...)`` call stages one placement scene, runs Empower's
-existing LLM + detector grounding path through ``Detection``, and returns placement
-coordinates without ROS, MoveIt, CuRoBo, sockets, or multiple terminals.
-"""
+"""Reusable class wrapper for Empower semantic placement."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import math
 import os
 from pathlib import Path
-import re
 import shutil
 import sys
-from typing import Any, Mapping, Sequence
-
-import numpy as np
-import yaml
-
-
-_ROOT = Path(__file__).resolve().parents[1]
-SEMANTIC_PLACEMENT_CONFIG_PATH = _ROOT / "configs" / "semantic_placement.yaml"
-_SEMANTIC_PLACEMENT_CONFIG = None
-
-
-def _load_semantic_placement_config() -> dict[str, Any]:
-    global _SEMANTIC_PLACEMENT_CONFIG
-    if _SEMANTIC_PLACEMENT_CONFIG is None:
-        with open(SEMANTIC_PLACEMENT_CONFIG_PATH) as f:
-            loaded = yaml.safe_load(f) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError(
-                f"Semantic placement config must be a mapping: "
-                f"{SEMANTIC_PLACEMENT_CONFIG_PATH}"
-            )
-        _SEMANTIC_PLACEMENT_CONFIG = loaded
-    return _SEMANTIC_PLACEMENT_CONFIG
-
-
-def _required_config_value(key: str) -> Any:
-    config = _load_semantic_placement_config()
-    if key not in config:
-        raise KeyError(f"Missing semantic placement config key: {key}")
-    return config[key]
-
-
-USE_CASE = str(_required_config_value("use_case"))
-REFINED_USE_CASE = str(_required_config_value("refined_use_case"))
-DEFAULT_SEMANTIC_MODE = str(_required_config_value("default_semantic_mode"))
-DEFAULT_FRAME_ID = str(_required_config_value("default_frame_id"))
-DEFAULT_RELATION_OFFSET_M = float(_required_config_value("default_relation_offset_m"))
-DEFAULT_EMPOWER_RELATION_OFFSET_M = float(
-    _required_config_value("default_empower_relation_offset_m")
-)
-SUPPORTED_DETECTOR_BACKENDS = tuple(
-    str(backend) for backend in _required_config_value("supported_detector_backends")
-)
+from typing import Any
 
 
 class EmpowerSemanticPlacementWrapper:
-    """Reusable Empower semantic placement runner.
+    """Empower semantic placement runner.
 
-    Heavy shared state such as the Empower loader, NLP resources, and selected
-    detector model is initialized once here. Call ``run(...)`` for each new
-    RGB/point-cloud placement scene.
+    The constructor prepares Empower's loader, detection pipeline, and selected
+    detector model once. Call ``run(...)`` for each RGB/point-cloud placement
+    scene.
     """
 
     def __init__(
         self,
         *,
         detector_backend: str,
-        frame_id: str = DEFAULT_FRAME_ID,
-        semantic_mode: str = DEFAULT_SEMANTIC_MODE,
-        relation_offset_m: float | None = None,
-        use_case: str | None = None,
+        frame_id: str,
+        semantic_mode: str,
+        relation_offset_m: float,
+        use_case: str,
         images_root: str | os.PathLike[str] | None = None,
         output_root: str | os.PathLike[str] | None = None,
         preload_models: bool = True,
     ) -> None:
         _ensure_src_on_path()
 
-        self.semantic_mode = _coerce_semantic_mode(semantic_mode)
-        self.use_case = str(use_case or _use_case_for_semantic_mode(self.semantic_mode))
+        if relation_offset_m is None:
+            raise ValueError("relation_offset_m is required")
+        if use_case is None or not use_case.strip():
+            raise ValueError("use_case is required")
+
+        self.semantic_mode = semantic_mode
+        self.use_case = use_case
         self.frame_id = frame_id
-        self.detector_backend = _coerce_detector_backend(detector_backend)
-        self.relation_offset_m = coerce_relation_offset_m(
-            relation_offset_m,
-            self.semantic_mode,
-        )
+        self.detector_backend = detector_backend
+        self.relation_offset_m = relation_offset_m
         self.images_root = images_root
         self.output_root = output_root
 
@@ -129,11 +79,7 @@ class EmpowerSemanticPlacementWrapper:
 
         image_path = _existing_path(image_path, "image_path")
         pointcloud_path = _existing_path(pointcloud_path, "pointcloud_path")
-        camera_info = _resolve_camera_info_path(
-            camera_info_path=camera_info_path,
-            image_path=image_path,
-            pointcloud_path=pointcloud_path,
-        )
+        camera_info = _resolve_camera_info_path(camera_info_path)
 
         scan_dir, dump_dir = _stage_semantic_placement_inputs(
             use_case=self.use_case,
@@ -159,319 +105,6 @@ class EmpowerSemanticPlacementWrapper:
 
         self.detection_instance.set_loader(loader_instance)
         return self.detection_instance.semantic_placement_result
-
-
-def run_semantic_placement(
-    *,
-    grasp_object: str,
-    image_path: str | os.PathLike[str],
-    pointcloud_path: str | os.PathLike[str],
-    detector_backend: str,
-    camera_info_path: str | os.PathLike[str] | None = None,
-    frame_id: str = DEFAULT_FRAME_ID,
-    semantic_mode: str = DEFAULT_SEMANTIC_MODE,
-    relation_offset_m: float | None = None,
-    use_case: str | None = None,
-    images_root: str | os.PathLike[str] | None = None,
-    output_root: str | os.PathLike[str] | None = None,
-) -> dict[str, Any]:
-    """Run semantic placement from Python and return the coordinate result."""
-
-    wrapper = EmpowerSemanticPlacementWrapper(
-        frame_id=frame_id,
-        detector_backend=detector_backend,
-        semantic_mode=semantic_mode,
-        relation_offset_m=relation_offset_m,
-        use_case=use_case,
-        images_root=images_root,
-        output_root=output_root,
-    )
-    return wrapper.run(
-        grasp_object=grasp_object,
-        image_path=image_path,
-        pointcloud_path=pointcloud_path,
-        camera_info_path=camera_info_path,
-    )
-
-
-SemanticPlacementWrapper = EmpowerSemanticPlacementWrapper
-
-
-def get_semantic_placement_coordinates_from_plan(
-    planning_text: str,
-    *,
-    placement_pointclouds: np.ndarray | Sequence[np.ndarray],
-    grasp_object: str | None = None,
-    placement_surface_height_m: float | None = None,
-    reference_positions_by_name: Mapping[str, Sequence[float]] | None = None,
-    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
-    orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
-    frame_id: str = DEFAULT_FRAME_ID,
-) -> dict[str, Any]:
-    """Convert an Empower LLM plan into semantic placement coordinates."""
-
-    intent = parse_semantic_placement_plan(
-        planning_text,
-        default_grasp_object=grasp_object,
-    )
-    if grasp_object:
-        intent = SemanticPlacementIntent(
-            grasp_object=_clean_object_name(grasp_object),
-            source_line=intent.source_line,
-            relation=intent.relation,
-            reference_object=intent.reference_object,
-        )
-
-    result = get_semantic_placement_coordinates(
-        intent.grasp_object,
-        placement_pointclouds=placement_pointclouds,
-        placement_surface_height_m=placement_surface_height_m,
-        orientation_rpy=orientation_rpy,
-        frame_id=frame_id,
-    )
-
-    if intent.reference_object and reference_positions_by_name:
-        reference_position = _resolve_reference_position(
-            intent.reference_object,
-            reference_positions_by_name,
-        )
-        if reference_position is not None:
-            result = _apply_reference_relation(
-                result,
-                reference_position=reference_position,
-                relation=intent.relation,
-                relation_offset_m=relation_offset_m,
-            )
-
-    return result
-
-
-def get_semantic_placement_coordinates(
-    grasp_object: str,
-    *,
-    placement_pointclouds: np.ndarray | Sequence[np.ndarray],
-    placement_surface_height_m: float | None = None,
-    orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
-    frame_id: str = DEFAULT_FRAME_ID,
-) -> dict[str, Any]:
-    """Return a surface placement coordinate from loaded point-cloud data."""
-
-    points = _coerce_pointclouds(placement_pointclouds)
-    surface_height = (
-        _coerce_height(placement_surface_height_m, "placement_surface_height_m")
-        if placement_surface_height_m is not None
-        else _infer_default_surface_height(points)
-    )
-    surface_xy, support_points = _estimate_surface_xy(points, surface_height)
-    coordinates = [float(surface_xy[0]), float(surface_xy[1]), float(surface_height)]
-    roll, pitch, yaw = _coerce_rpy(orientation_rpy)
-
-    return {
-        "use_case": USE_CASE,
-        "grasp_object": grasp_object,
-        "normalized_grasp_object": _normalize_object_name(grasp_object),
-        "frame_id": frame_id,
-        "coordinates": coordinates,
-        "pose": {
-            "frame_id": frame_id,
-            "position": {
-                "x": coordinates[0],
-                "y": coordinates[1],
-                "z": coordinates[2],
-            },
-            "orientation_rpy": {
-                "roll": roll,
-                "pitch": pitch,
-                "yaw": yaw,
-            },
-        },
-        "surface_position": {
-            "x": coordinates[0],
-            "y": coordinates[1],
-            "z": coordinates[2],
-        },
-        "support_point_count": int(support_points.shape[0]),
-        "support_bounds": _support_bounds(support_points),
-    }
-
-
-@dataclass(frozen=True)
-class SemanticPlacementIntent:
-    """Semantic placement action extracted from an Empower action plan."""
-
-    grasp_object: str
-    source_line: str
-    relation: str | None = None
-    reference_object: str | None = None
-
-
-def parse_semantic_placement_plan(
-    planning_text: str,
-    default_grasp_object: str | None = None,
-) -> SemanticPlacementIntent:
-    """Extract the held object and optional relation/reference from a plan."""
-
-    last_grabbed_object: str | None = (
-        _clean_object_name(default_grasp_object) if default_grasp_object else None
-    )
-    for raw_line in planning_text.splitlines():
-        line = _strip_step_prefix(raw_line)
-        if not line:
-            continue
-
-        command, argument = _split_command(line)
-        if command == "GRAB" and argument:
-            last_grabbed_object = _clean_object_name(argument)
-            continue
-
-        if command not in {"DROP", "PLACE"} or not argument:
-            continue
-
-        parsed = _parse_placement_argument(argument, last_grabbed_object)
-        if parsed is not None:
-            grasp_object, relation, reference_object = parsed
-            return SemanticPlacementIntent(
-                grasp_object=grasp_object,
-                source_line=line,
-                relation=relation,
-                reference_object=reference_object,
-            )
-
-    raise ValueError(
-        "No semantic placement action found. Expected a plan line like "
-        "'DROP milk carton right to cereal box'."
-    )
-
-
-def _parse_placement_argument(
-    argument: str,
-    last_grabbed_object: str | None,
-) -> tuple[str, str | None, str | None] | None:
-    relation_parsed = _parse_relation_argument(argument, last_grabbed_object)
-    if relation_parsed is not None:
-        return relation_parsed
-
-    match = re.match(
-        r"(?P<object>.+?)\s+(?:on|onto|in|into|at|to)\s+.+$",
-        argument,
-        flags=re.IGNORECASE,
-    )
-    if match:
-        return _clean_object_name(match.group("object")), None, None
-
-    if last_grabbed_object:
-        return last_grabbed_object, None, None
-
-    return _clean_object_name(argument), None, None
-
-
-def _parse_relation_argument(
-    argument: str,
-    last_grabbed_object: str | None,
-) -> tuple[str, str, str] | None:
-    relation_pattern = r"(?P<relation>left|right)"
-    match = re.match(
-        rf"(?P<object>.+?)\s+{relation_pattern}\s+(?:of|to\s+)?(?P<reference>.+)$",
-        argument,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        match = re.match(
-            rf"{relation_pattern}\s+(?:of|to\s+)?(?P<reference>.+)$",
-            argument,
-            flags=re.IGNORECASE,
-        )
-        if not match or not last_grabbed_object:
-            return None
-        grasp_object = last_grabbed_object
-    else:
-        grasp_object = _clean_object_name(match.group("object"))
-
-    reference = _clean_reference_name(match.group("reference"))
-    if not reference:
-        return None
-
-    return grasp_object, _clean_phrase(match.group("relation")), reference
-
-
-def _resolve_reference_position(
-    reference_object: str,
-    reference_positions_by_name: Mapping[str, Sequence[float]],
-) -> np.ndarray | None:
-    normalized_reference = _normalize_key(reference_object)
-
-    for name, position in reference_positions_by_name.items():
-        normalized_name = _normalize_key(name)
-        if normalized_name == normalized_reference:
-            point = np.asarray(position, dtype=float)
-            if point.shape == (3,) and np.isfinite(point).all():
-                return point
-
-    base_reference = _normalize_reference_key(reference_object)
-    for name, position in reference_positions_by_name.items():
-        normalized_name = _normalize_reference_key(name)
-        if normalized_name == base_reference:
-            point = np.asarray(position, dtype=float)
-            if point.shape == (3,) and np.isfinite(point).all():
-                return point
-    return None
-
-
-def _apply_reference_relation(
-    result: dict[str, Any],
-    *,
-    reference_position: np.ndarray,
-    relation: str | None,
-    relation_offset_m: float,
-) -> dict[str, Any]:
-    updated = dict(result)
-    offset = abs(float(relation_offset_m))
-
-    if relation == "left":
-        direction = -1.0
-    elif relation == "right":
-        direction = 1.0
-    else:
-        return updated
-
-    surface = _candidate_surface_point(
-        reference_position=reference_position,
-        direction=direction,
-        preferred_offset_m=offset,
-    )
-    coordinates = [float(surface[0]), float(surface[1]), float(surface[2])]
-    updated["coordinates"] = coordinates
-    updated["surface_position"] = {
-        "x": coordinates[0],
-        "y": coordinates[1],
-        "z": coordinates[2],
-    }
-    updated["pose"] = dict(result["pose"])
-    updated["pose"]["position"] = {
-        "x": coordinates[0],
-        "y": coordinates[1],
-        "z": coordinates[2],
-    }
-    return updated
-
-
-def _candidate_surface_point(
-    *,
-    reference_position: np.ndarray,
-    direction: float,
-    preferred_offset_m: float,
-) -> np.ndarray:
-    # Coordinates are in gemini336_color_optical_frame. Matching original
-    # Empower behavior, left/right is applied as a fixed offset from the
-    # detector-derived reference object centroid.
-    return np.array(
-        [
-            float(reference_position[0] + direction * preferred_offset_m),
-            float(reference_position[1]),
-            float(reference_position[2]),
-        ],
-        dtype=float,
-    )
 
 
 def _stage_semantic_placement_inputs(
@@ -560,80 +193,10 @@ def _build_semantic_loader(
     loader_instance.DUMP_DIR = str(dump_dir) + os.sep
     loader_instance.grasp_object = grasp_object
     loader_instance.semantic_frame_id = frame_id
-    loader_instance.detector_backend = _coerce_detector_backend(detector_backend)
-    loader_instance.semantic_mode = _coerce_semantic_mode(semantic_mode)
-    loader_instance.semantic_relation_offset_m = coerce_relation_offset_m(
-        relation_offset_m,
-        loader_instance.semantic_mode,
-    )
+    loader_instance.detector_backend = detector_backend
+    loader_instance.semantic_mode = semantic_mode
+    loader_instance.semantic_relation_offset_m = relation_offset_m
     return loader_instance
-
-
-def _coerce_semantic_mode(semantic_mode: str) -> str:
-    mode = str(semantic_mode or DEFAULT_SEMANTIC_MODE).strip().lower()
-    aliases = {
-        "refined": REFINED_USE_CASE,
-        "semantic_placement_refined": REFINED_USE_CASE,
-        "empower": USE_CASE,
-        "baseline": USE_CASE,
-        "original": USE_CASE,
-        "semantic_placement": USE_CASE,
-    }
-    if mode not in aliases:
-        raise ValueError(
-            "semantic_mode must be one of: semantic_placement_refined, "
-            "semantic_placement"
-        )
-    return aliases[mode]
-
-
-def _use_case_for_semantic_mode(semantic_mode: str) -> str:
-    return _coerce_semantic_mode(semantic_mode)
-
-
-def default_relation_offset_m(semantic_mode: str) -> float:
-    mode = _coerce_semantic_mode(semantic_mode)
-    if mode == USE_CASE:
-        return DEFAULT_EMPOWER_RELATION_OFFSET_M
-    return DEFAULT_RELATION_OFFSET_M
-
-
-def coerce_relation_offset_m(
-    relation_offset_m: float | None,
-    semantic_mode: str,
-) -> float:
-    if relation_offset_m is None:
-        return default_relation_offset_m(semantic_mode)
-
-    offset = float(relation_offset_m)
-    if not math.isfinite(offset) or offset < 0:
-        raise ValueError("relation_offset_m must be a finite non-negative distance")
-    return offset
-
-
-def _coerce_detector_backend(detector_backend: str | None) -> str:
-    if detector_backend is None or not str(detector_backend).strip():
-        raise ValueError(
-            "detector_backend is required; pass one of: "
-            f"{', '.join(SUPPORTED_DETECTOR_BACKENDS)}"
-        )
-
-    backend = str(detector_backend).strip().lower()
-    aliases = {
-        "sam": "sam3",
-        "sam3": "sam3",
-        "yolo": "yolow",
-        "yolo-world": "yolow",
-        "yolo_world": "yolow",
-        "yoloworld": "yolow",
-        "yolow": "yolow",
-    }
-    if backend not in aliases or aliases[backend] not in SUPPORTED_DETECTOR_BACKENDS:
-        raise ValueError(
-            "detector_backend must be one of: "
-            f"{', '.join(SUPPORTED_DETECTOR_BACKENDS)}"
-        )
-    return aliases[backend]
 
 
 def _ensure_src_on_path() -> None:
@@ -643,14 +206,10 @@ def _ensure_src_on_path() -> None:
 
 
 def _resolve_camera_info_path(
-    *,
     camera_info_path: str | os.PathLike[str] | None,
-    image_path: Path,
-    pointcloud_path: Path,
 ) -> Path | None:
     if camera_info_path is not None:
         return _existing_path(camera_info_path, "camera_info_path")
-
     return None
 
 
@@ -661,274 +220,6 @@ def _existing_path(path: str | os.PathLike[str], name: str) -> Path:
     return value
 
 
-def _estimate_surface_xy(
-    points: np.ndarray,
-    surface_height: float,
-    *,
-    initial_band_m: float = 0.015,
-    grid_resolution_m: float = 0.03,
-    min_points_per_cell: int = 5,
-) -> tuple[np.ndarray, np.ndarray]:
-    last_band_points = np.empty((0, 3), dtype=float)
-    for band in _band_schedule(initial_band_m):
-        band_points = points[np.abs(points[:, 2] - surface_height) <= band]
-        last_band_points = band_points
-        if band_points.shape[0] >= 50:
-            break
-
-    if last_band_points.shape[0] == 0:
-        raise ValueError(
-            f"No pointcloud support points found near surface height {surface_height:.3f} m"
-        )
-
-    support_points = _largest_xy_component(
-        last_band_points,
-        grid_resolution_m=grid_resolution_m,
-        min_points_per_cell=min_points_per_cell,
-    )
-    return _robust_bbox_center(support_points[:, :2]), support_points
-
-
-def _infer_default_surface_height(points: np.ndarray) -> float:
-    z = points[:, 2]
-    z = z[np.isfinite(z)]
-    if z.shape[0] == 0:
-        raise ValueError("placement_pointclouds contains no finite z values")
-
-    bin_width_m = 0.01
-    z_min = float(np.quantile(z, 0.01))
-    z_max = float(np.quantile(z, 0.99))
-    if z_max <= z_min:
-        return float(np.median(z))
-
-    bins = np.arange(z_min, z_max + bin_width_m, bin_width_m)
-    counts, edges = np.histogram(z, bins=bins)
-    if counts.size < 3:
-        return float(np.median(z))
-
-    centers = (edges[:-1] + edges[1:]) / 2.0
-    smoothed = np.convolve(counts, np.ones(3) / 3.0, mode="same")
-    min_peak_count = max(100, int(0.002 * z.shape[0]))
-
-    for idx in range(1, smoothed.shape[0] - 1):
-        if (
-            smoothed[idx] >= smoothed[idx - 1]
-            and smoothed[idx] >= smoothed[idx + 1]
-            and smoothed[idx] >= min_peak_count
-        ):
-            return float(centers[idx])
-
-    raise ValueError("Cannot infer a placement surface from the supplied point cloud")
-
-
-def _coerce_pointclouds(pointclouds: np.ndarray | Sequence[np.ndarray]) -> np.ndarray:
-    if isinstance(pointclouds, np.ndarray):
-        point_sets = [_coerce_xyz_points(pointclouds, "placement_pointclouds")]
-    else:
-        point_sets = [
-            _coerce_xyz_points(pointcloud, "placement_pointclouds")
-            for pointcloud in pointclouds
-        ]
-
-    if not point_sets:
-        raise ValueError("placement_pointclouds cannot be empty")
-
-    return np.vstack(point_sets)
-
-
-def _coerce_xyz_points(points: np.ndarray, name: str) -> np.ndarray:
-    xyz = np.asarray(points, dtype=float)
-    if xyz.ndim != 2 or xyz.shape[1] < 3:
-        raise ValueError(f"{name} must be an array with shape (N, 3+) coordinates")
-
-    xyz = xyz[:, :3]
-    xyz = xyz[np.isfinite(xyz).all(axis=1)]
-    if xyz.shape[0] == 0:
-        raise ValueError(f"{name} contains no finite XYZ points")
-
-    return xyz
-
-
-def _coerce_height(value: float, name: str) -> float:
-    height = float(value)
-    if not math.isfinite(height):
-        raise ValueError(f"{name} must be finite")
-    return height
-
-
-def _coerce_rpy(orientation_rpy: Sequence[float]) -> tuple[float, float, float]:
-    rpy = np.asarray(orientation_rpy, dtype=float)
-    if rpy.shape != (3,) or not np.isfinite(rpy).all():
-        raise ValueError("orientation_rpy must be finite (roll, pitch, yaw)")
-    return tuple(float(value) for value in rpy)
-
-
-def _band_schedule(initial_band: float) -> tuple[float, ...]:
-    bands = [initial_band, 0.025, 0.04, 0.06]
-    return tuple(dict.fromkeys(float(max(0.001, band)) for band in bands))
-
-
-def _largest_xy_component(
-    band_points: np.ndarray,
-    *,
-    grid_resolution_m: float,
-    min_points_per_cell: int,
-) -> np.ndarray:
-    xy = band_points[:, :2]
-    xy_min = xy.min(axis=0)
-    cells = np.floor((xy - xy_min) / grid_resolution_m).astype(np.int64)
-
-    counts: dict[tuple[int, int], int] = {}
-    for cell_x, cell_y in cells:
-        key = (int(cell_x), int(cell_y))
-        counts[key] = counts.get(key, 0) + 1
-
-    occupied = {
-        key: count
-        for key, count in counts.items()
-        if count >= min_points_per_cell
-    }
-    if not occupied:
-        return band_points
-
-    seen: set[tuple[int, int]] = set()
-    best_component: set[tuple[int, int]] = set()
-    best_score = (-1, -1)
-
-    for start in occupied:
-        if start in seen:
-            continue
-
-        stack = [start]
-        seen.add(start)
-        component: set[tuple[int, int]] = set()
-        point_count = 0
-
-        while stack:
-            cell = stack.pop()
-            component.add(cell)
-            point_count += occupied[cell]
-            cell_x, cell_y = cell
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    neighbor = (cell_x + dx, cell_y + dy)
-                    if neighbor in occupied and neighbor not in seen:
-                        seen.add(neighbor)
-                        stack.append(neighbor)
-
-        score = (len(component), point_count)
-        if score > best_score:
-            best_component = component
-            best_score = score
-
-    component_mask = np.fromiter(
-        ((int(cell[0]), int(cell[1])) in best_component for cell in cells),
-        dtype=bool,
-        count=cells.shape[0],
-    )
-    support_points = band_points[component_mask]
-    return support_points if support_points.shape[0] else band_points
-
-
-def _robust_bbox_center(xy: np.ndarray) -> np.ndarray:
-    if xy.shape[0] == 1:
-        return xy[0]
-
-    lower = np.quantile(xy, 0.05, axis=0)
-    upper = np.quantile(xy, 0.95, axis=0)
-    center = (lower + upper) / 2.0
-
-    if not np.isfinite(center).all():
-        center = np.median(xy, axis=0)
-
-    return center.astype(float)
-
-
-def _support_bounds(points: np.ndarray) -> dict[str, list[float]]:
-    if points.shape[0] == 0:
-        return {"min": [], "max": [], "p05": [], "p95": []}
-
-    return {
-        "min": _float_list(np.min(points, axis=0)),
-        "max": _float_list(np.max(points, axis=0)),
-        "p05": _float_list(np.quantile(points, 0.05, axis=0)),
-        "p95": _float_list(np.quantile(points, 0.95, axis=0)),
-    }
-
-
-def _float_list(values: np.ndarray) -> list[float]:
-    return [
-        float(value) if math.isfinite(float(value)) else float("nan")
-        for value in values
-    ]
-
-
-def _strip_step_prefix(line: str) -> str:
-    line = line.strip()
-    line = re.sub(r"^[-*]\s*", "", line)
-    line = re.sub(r"^\d+[\).:-]?\s*", "", line)
-    return line.strip()
-
-
-def _split_command(line: str) -> tuple[str, str]:
-    parts = line.strip().split(maxsplit=1)
-    if not parts:
-        return "", ""
-    command = parts[0].upper().rstrip(":")
-    argument = parts[1].strip() if len(parts) > 1 else ""
-    return command, argument
-
-
-def _clean_object_name(value: str) -> str:
-    value = _clean_phrase(value)
-    value = re.sub(r"^(?:the|a|an)\s+", "", value)
-    return value
-
-
-def _clean_reference_name(value: str) -> str:
-    value = _clean_phrase(value)
-    value = re.sub(r"^(?:the|a|an|other)\s+", "", value)
-    value = re.sub(r"^(?:the\s+)?other\s+", "", value)
-    return value
-
-
-def _normalize_object_name(grasp_object: str) -> str:
-    value = grasp_object.strip().lower()
-    value = re.sub(r"^[0-9]+[_\-\s]+", "", value)
-    value = re.sub(r"[^a-z0-9]+", "_", value)
-    return value.strip("_")
-
-
-def _clean_phrase(value: str) -> str:
-    value = value.strip().lower()
-    value = re.sub(r"^[\"'`]+|[\"'`.,;:]+$", "", value)
-    value = re.sub(r"[_\-]+", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def _normalize_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
-
-
-def _normalize_reference_key(value: str) -> str:
-    normalized = _normalize_key(value)
-    return re.sub(r"(?:_\d+)+$", "", normalized)
-
-
 __all__ = [
-    "DEFAULT_EMPOWER_RELATION_OFFSET_M",
-    "DEFAULT_SEMANTIC_MODE",
-    "DEFAULT_RELATION_OFFSET_M",
-    "DEFAULT_FRAME_ID",
     "EmpowerSemanticPlacementWrapper",
-    "REFINED_USE_CASE",
-    "SemanticPlacementWrapper",
-    "SEMANTIC_PLACEMENT_CONFIG_PATH",
-    "SUPPORTED_DETECTOR_BACKENDS",
-    "USE_CASE",
-    "coerce_relation_offset_m",
-    "default_relation_offset_m",
-    "run_semantic_placement",
 ]

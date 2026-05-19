@@ -8,13 +8,13 @@ import math
 import os
 import re
 from agents_langchain import Agents
+from semantic_placement_config import is_semantic_placement_mode
 from semantic_placement_grounding import get_semantic_grasp_object
-from semantic_placement_grounding import is_semantic_placement_mode
 from semantic_placement_grounding import run_grounded_semantic_placement
-from semantic_placement_grounding import semantic_placement_empower_task_description
 from semantic_placement_grounding import semantic_placement_mode
-from semantic_placement_grounding import semantic_placement_prompt_objects
-from semantic_placement_grounding import semantic_placement_task_description
+from semantic_placement_prompts import semantic_placement_empower_task_description
+from semantic_placement_prompts import semantic_placement_prompt_objects
+from semantic_placement_prompts import semantic_placement_refined_task_description
 
 class Detection:
 
@@ -57,7 +57,7 @@ class Detection:
         if is_semantic_placement_mode(use_case):
             grasp_object = get_semantic_grasp_object(self.loader_instance, required=True)
             if semantic_placement_mode(self.loader_instance) == "semantic_placement_refined":
-                task_description = semantic_placement_task_description(grasp_object)
+                task_description = semantic_placement_refined_task_description(grasp_object)
             else:
                 task_description = semantic_placement_empower_task_description(
                     grasp_object

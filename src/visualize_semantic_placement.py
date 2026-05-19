@@ -10,10 +10,10 @@ from pathlib import Path
 import numpy as np
 import open3d as o3d
 
+from semantic_placement_config import DEFAULT_FRAME_ID
+from semantic_placement_config import DEFAULT_SEMANTIC_MODE
+from semantic_placement_config import SUPPORTED_DETECTOR_BACKENDS
 from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
-from semantic_placement_wrapper import DEFAULT_FRAME_ID
-from semantic_placement_wrapper import DEFAULT_SEMANTIC_MODE
-from semantic_placement_wrapper import SUPPORTED_DETECTOR_BACKENDS
 
 
 def main() -> None:
@@ -24,6 +24,7 @@ def main() -> None:
         detector_backend=args.detector_backend,
         semantic_mode=args.semantic_mode,
         relation_offset_m=args.relation_offset_m,
+        use_case=args.semantic_mode,
         images_root=args.images_root,
         output_root=args.output_root,
     )
@@ -81,7 +82,7 @@ def main() -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Call run_semantic_placement(...) and show the returned placement "
+            "Call EmpowerSemanticPlacementWrapper.run(...) and show the returned placement "
             "coordinate in the input point cloud. Red sphere = returned coordinate."
         )
     )
@@ -115,8 +116,6 @@ def _parse_args() -> argparse.Namespace:
         choices=(
             "semantic_placement_refined",
             "semantic_placement",
-            "refined",
-            "empower",
         ),
         default=DEFAULT_SEMANTIC_MODE,
         help=(
@@ -129,9 +128,9 @@ def _parse_args() -> argparse.Namespace:
         "--relation-offset-m",
         "--offset-m",
         type=float,
-        default=None,
+        required=True,
         help=(
-            "Left/right placement offset in meters. Defaults to 0.15."
+            "Left/right placement offset in meters."
         ),
     )
     parser.add_argument(

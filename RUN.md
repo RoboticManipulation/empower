@@ -89,7 +89,7 @@ For the two detector setups:
 
   reference = centroid(reference object pointcloud)
   offset = value passed by --relation-offset-m
-           default 0.15 for both semantic_placement_refined and semantic_placement
+      
 
   left:
     coordinate = [reference_x - offset, reference_y, reference_z]
@@ -173,5 +173,4 @@ python3 execute_task.py
 cd src
 USE_CASE=order_by_height python3 color_pcl_local.py
 ```
-
 
