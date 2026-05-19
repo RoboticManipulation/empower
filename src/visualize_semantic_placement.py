@@ -10,23 +10,28 @@ from pathlib import Path
 import numpy as np
 import open3d as o3d
 
-from semantic_placement_wrapper import run_semantic_placement
+from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 from semantic_placement_wrapper import DEFAULT_FRAME_ID
-from semantic_placement_wrapper import DEFAULT_DETECTOR_BACKEND
+from semantic_placement_wrapper import DEFAULT_SEMANTIC_MODE
+from semantic_placement_wrapper import SUPPORTED_DETECTOR_BACKENDS
 
 
 def main() -> None:
     args = _parse_args()
 
-    result = run_semantic_placement(
+    wrapper = EmpowerSemanticPlacementWrapper(
+        frame_id=args.frame_id,
+        detector_backend=args.detector_backend,
+        semantic_mode=args.semantic_mode,
+        relation_offset_m=args.relation_offset_m,
+        images_root=args.images_root,
+        output_root=args.output_root,
+    )
+    result = wrapper.run(
         grasp_object=args.grasp_object,
         image_path=args.image,
         pointcloud_path=args.pointcloud,
         camera_info_path=args.camera_info,
-        frame_id=args.frame_id,
-        detector_backend=args.detector_backend,
-        images_root=args.images_root,
-        output_root=args.output_root,
     )
 
     pointcloud = _load_pointcloud(args.pointcloud, args.voxel_size)
@@ -49,6 +54,8 @@ def main() -> None:
 
     print(f"[OK] grasp object: {result.get('grasp_object', args.grasp_object)}")
     print(f"[OK] frame_id    : {result.get('frame_id', args.frame_id)}")
+    if "relation_offset_m" in result:
+        print(f"[OK] offset_m    : {float(result['relation_offset_m']):.4f}")
     print(f"[OK] coordinate  : {_fmt_point(coordinate)}")
 
     if args.write_prefix:
@@ -98,9 +105,34 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--detector-backend",
         "--detector",
-        choices=("sam3", "yolow"),
-        default=DEFAULT_DETECTOR_BACKEND,
+        choices=SUPPORTED_DETECTOR_BACKENDS,
+        required=True,
         help="Prompt-conditioned detector backend to use for grounding",
+    )
+    parser.add_argument(
+        "--semantic-mode",
+        "--placement-mode",
+        choices=(
+            "semantic_placement_refined",
+            "semantic_placement",
+            "refined",
+            "empower",
+        ),
+        default=DEFAULT_SEMANTIC_MODE,
+        help=(
+            "semantic_placement_refined uses the refined single-reference "
+            "logic; semantic_placement uses the original Empower-style plan "
+            "and centroid offsets"
+        ),
+    )
+    parser.add_argument(
+        "--relation-offset-m",
+        "--offset-m",
+        type=float,
+        default=None,
+        help=(
+            "Left/right placement offset in meters. Defaults to 0.15."
+        ),
     )
     parser.add_argument(
         "--images-root",

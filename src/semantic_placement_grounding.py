@@ -10,8 +10,14 @@ from typing import Any, Mapping
 import cv2
 import numpy as np
 
+from semantic_placement_wrapper import DEFAULT_EMPOWER_RELATION_OFFSET_M
+from semantic_placement_wrapper import coerce_relation_offset_m
+from semantic_placement_wrapper import get_semantic_placement_coordinates
 from semantic_placement_wrapper import get_semantic_placement_coordinates_from_plan
 from semantic_placement_wrapper import parse_semantic_placement_plan
+from semantic_placement_wrapper import REFINED_USE_CASE
+from semantic_placement_wrapper import USE_CASE
+from semantic_placement_wrapper import _coerce_semantic_mode
 
 
 def run_grounded_semantic_placement(
@@ -38,14 +44,31 @@ def run_grounded_semantic_placement(
     )
     grasp_object = get_semantic_grasp_object(loader_instance, required=True)
     planning_text = results_multi.get("planning_agent_info", "")
+    mode = semantic_placement_mode(loader_instance)
+    relation_offset_m = semantic_relation_offset_m(loader_instance)
 
-    result = get_semantic_placement_coordinates_from_plan(
-        planning_text,
-        placement_pointclouds=placement_pointcloud,
-        grasp_object=grasp_object,
-        reference_positions_by_name=reference_positions,
-        frame_id=semantic_frame_id(loader_instance),
-    )
+    if mode == REFINED_USE_CASE:
+        result = get_semantic_placement_coordinates_from_plan(
+            planning_text,
+            placement_pointclouds=placement_pointcloud,
+            grasp_object=grasp_object,
+            reference_positions_by_name=reference_positions,
+            relation_offset_m=relation_offset_m,
+            frame_id=semantic_frame_id(loader_instance),
+        )
+    else:
+        result = get_empower_style_semantic_coordinates(
+            planning_text=planning_text,
+            placement_pointcloud=placement_pointcloud,
+            grasp_object=grasp_object,
+            reference_positions=reference_positions,
+            relation_offset_m=relation_offset_m,
+            frame_id=semantic_frame_id(loader_instance),
+        )
+
+    result["semantic_mode"] = mode
+    result["use_case"] = getattr(loader_instance, "use_case", mode)
+    result["relation_offset_m"] = relation_offset_m
 
     result_path = os.path.join(
         loader_instance.DUMP_DIR,
@@ -57,6 +80,31 @@ def run_grounded_semantic_placement(
     print(f"[OK] Semantic placement result -> {result_path}")
     print(f"[OK] Semantic placement coordinates: {result['coordinates']}")
     return result
+
+
+def semantic_placement_mode(loader_instance: Any) -> str:
+    return _coerce_semantic_mode(
+        getattr(loader_instance, "semantic_mode", None)
+        or getattr(loader_instance, "use_case", None)
+        or REFINED_USE_CASE
+    )
+
+
+def is_semantic_placement_mode(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        _coerce_semantic_mode(value)
+    except ValueError:
+        return False
+    return True
+
+
+def semantic_relation_offset_m(loader_instance: Any) -> float:
+    return coerce_relation_offset_m(
+        getattr(loader_instance, "semantic_relation_offset_m", None),
+        semantic_placement_mode(loader_instance),
+    )
 
 
 def get_semantic_grasp_object(loader_instance: Any, required: bool = False) -> str | None:
@@ -104,6 +152,22 @@ def semantic_placement_task_description(grasp_object: str) -> str:
         "relation/reference. Return exactly one action line such as "
         f"'DROP {grasp_object} left to cereal box' or 'DROP {grasp_object} "
         "right to cereal box'."
+    )
+
+
+def semantic_placement_empower_task_description(grasp_object: str) -> str:
+    return (
+        f"The robot is already holding {grasp_object}. "
+        "Use the image as the placement scene and place the held object where "
+        "it semantically belongs.\n"
+        "Use only one action line: DROP. DROP places the held object "
+        "with respect to a visible reference "
+        "object, for example "
+        f"'DROP {grasp_object} left to cereal box', "
+        f"'DROP {grasp_object} right to cereal box', or "
+        f"'DROP {grasp_object} on cereal box'.\n"
+        "Use only these placement relations: left, right, or on. Return only "
+        "the DROP action line and nothing else."
     )
 
 
@@ -212,6 +276,190 @@ def semantic_reference_matches_grasp(reference_name: str, grasp_object: str) -> 
     reference = re.sub(r"\s+\d+$", "", reference)
     grasp = normalize_object_name(grasp_object)
     return reference == grasp
+
+
+def get_empower_style_semantic_coordinates(
+    *,
+    planning_text: str,
+    placement_pointcloud: np.ndarray,
+    grasp_object: str,
+    reference_positions: Mapping[str, np.ndarray],
+    frame_id: str,
+    relation_offset_m: float = DEFAULT_EMPOWER_RELATION_OFFSET_M,
+) -> dict[str, Any]:
+    result = get_semantic_placement_coordinates(
+        grasp_object,
+        placement_pointclouds=placement_pointcloud,
+        frame_id=frame_id,
+    )
+
+    action_line = last_empower_placement_action(planning_text)
+    if action_line is None:
+        return result
+
+    relation = parse_empower_relation(action_line)
+    reference_name, reference_position = resolve_empower_reference(
+        action_line=action_line,
+        relation=relation,
+        reference_positions=reference_positions,
+        grasp_object=grasp_object,
+    )
+    if reference_position is None:
+        result["planning_source_line"] = action_line
+        result["relation"] = relation
+        result["reference_object"] = reference_name
+        return result
+
+    coordinate = apply_empower_relation_offset(
+        reference_position,
+        relation=relation,
+        relation_offset_m=relation_offset_m,
+    )
+    update_result_coordinate(result, coordinate)
+    result["planning_source_line"] = action_line
+    result["relation"] = relation
+    result["relation_offset_m"] = float(relation_offset_m)
+    result["reference_object"] = reference_name
+    result["reference_position"] = {
+        "x": float(reference_position[0]),
+        "y": float(reference_position[1]),
+        "z": float(reference_position[2]),
+    }
+    return result
+
+
+def last_empower_placement_action(planning_text: str) -> str | None:
+    action_line = None
+    for raw_line in planning_text.splitlines():
+        line = strip_step_prefix(raw_line)
+        command = line.split(maxsplit=1)[0].upper() if line.split() else ""
+        if command in {"DROP", "PLACE"}:
+            action_line = line
+    return action_line
+
+
+def parse_empower_relation(action_line: str) -> str | None:
+    normalized = f" {normalize_object_name(action_line)} "
+    relation_patterns = (
+        ("next_to", " next to "),
+        ("right", " right "),
+        ("left", " left "),
+        ("up", " up "),
+        ("on", " on "),
+        ("in", " in "),
+        ("near", " near "),
+        ("beside", " beside "),
+        ("with", " with "),
+    )
+    for relation, token in relation_patterns:
+        if token in normalized:
+            return relation
+    return None
+
+
+def resolve_empower_reference(
+    *,
+    action_line: str,
+    relation: str | None,
+    reference_positions: Mapping[str, np.ndarray],
+    grasp_object: str,
+) -> tuple[str | None, np.ndarray | None]:
+    search_text = reference_search_text(action_line, relation, grasp_object)
+    candidates = matching_references(search_text, reference_positions)
+    if not candidates:
+        candidates = matching_references(action_line, reference_positions)
+    if not candidates:
+        return None, None
+
+    _, name, position = max(candidates, key=lambda item: item[0])
+    point = np.asarray(position, dtype=float)
+    if point.shape != (3,) or not np.isfinite(point).all():
+        return name, None
+    return name, point
+
+
+def reference_search_text(
+    action_line: str,
+    relation: str | None,
+    grasp_object: str,
+) -> str:
+    text = strip_step_prefix(action_line)
+    relation_regex = {
+        "left": r"\bleft\s+(?:of|to)\s+(.+)$",
+        "right": r"\bright\s+(?:of|to)\s+(.+)$",
+        "next_to": r"\bnext\s+to\s+(.+)$",
+        "near": r"\bnear\s+(.+)$",
+        "beside": r"\bbeside\s+(.+)$",
+        "with": r"\bwith\s+(.+)$",
+        "on": r"\b(?:on|onto)\s+(.+)$",
+        "in": r"\b(?:in|into)\s+(.+)$",
+        "up": r"\bup\s+(?:of|to)?\s*(.+)$",
+    }
+    pattern = relation_regex.get(relation or "")
+    if pattern:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    cleaned = re.sub(r"^(?:DROP|PLACE)\s+", "", text, flags=re.IGNORECASE)
+    grasp = re.escape(grasp_object.strip())
+    cleaned = re.sub(grasp, "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def matching_references(
+    text: str,
+    reference_positions: Mapping[str, np.ndarray],
+) -> list[tuple[int, str, np.ndarray]]:
+    normalized_text = normalize_object_name(text)
+    matches = []
+    for name, position in reference_positions.items():
+        normalized_name = normalize_object_name(name)
+        if not normalized_name:
+            continue
+        if normalized_name in normalized_text or normalized_text in normalized_name:
+            matches.append((len(normalized_name), name, position))
+    return matches
+
+
+def apply_empower_relation_offset(
+    reference_position: np.ndarray,
+    *,
+    relation: str | None,
+    relation_offset_m: float = DEFAULT_EMPOWER_RELATION_OFFSET_M,
+) -> np.ndarray:
+    coordinate = np.asarray(reference_position, dtype=float).copy()
+    offset = abs(float(relation_offset_m))
+    if relation == "left":
+        coordinate[0] -= offset
+    elif relation == "right":
+        coordinate[0] += offset
+    elif relation == "up":
+        coordinate[1] -= offset
+    return coordinate
+
+
+def update_result_coordinate(result: dict[str, Any], coordinate: np.ndarray) -> None:
+    coordinates = [float(coordinate[0]), float(coordinate[1]), float(coordinate[2])]
+    result["coordinates"] = coordinates
+    result["surface_position"] = {
+        "x": coordinates[0],
+        "y": coordinates[1],
+        "z": coordinates[2],
+    }
+    result["pose"] = dict(result["pose"])
+    result["pose"]["position"] = {
+        "x": coordinates[0],
+        "y": coordinates[1],
+        "z": coordinates[2],
+    }
+
+
+def strip_step_prefix(line: str) -> str:
+    line = line.strip()
+    line = re.sub(r"^[-*]\s*", "", line)
+    line = re.sub(r"^\d+[\).:-]?\s*", "", line)
+    return line.strip()
 
 
 def load_pointcloud_points(pcd_path: str) -> np.ndarray:

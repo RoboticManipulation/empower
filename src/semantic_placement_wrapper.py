@@ -1,9 +1,10 @@
-"""Single-call semantic placement wrapper for Empower.
+"""Reusable semantic placement wrapper for Empower.
 
-The public entry point is ``run_semantic_placement``. It stages one placement
-scene, runs Empower's existing LLM + detector grounding path through
-``Detection``, and returns placement coordinates without ROS, MoveIt, CuRoBo,
-sockets, or multiple terminals.
+The public entry point is ``EmpowerSemanticPlacementWrapper``. It prepares
+Empower's loader, detection pipeline, and selected detector model once in
+``__init__``. Each ``run(...)`` call stages one placement scene, runs Empower's
+existing LLM + detector grounding path through ``Detection``, and returns placement
+coordinates without ROS, MoveIt, CuRoBo, sockets, or multiple terminals.
 """
 
 from __future__ import annotations
@@ -18,12 +19,146 @@ import sys
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import yaml
 
 
-USE_CASE = "semantic_placement"
-DEFAULT_FRAME_ID = "gemini336_color_optical_frame"
-DEFAULT_RELATION_OFFSET_M = 0.15
-DEFAULT_DETECTOR_BACKEND = "sam3"
+_ROOT = Path(__file__).resolve().parents[1]
+SEMANTIC_PLACEMENT_CONFIG_PATH = _ROOT / "configs" / "semantic_placement.yaml"
+_SEMANTIC_PLACEMENT_CONFIG = None
+
+
+def _load_semantic_placement_config() -> dict[str, Any]:
+    global _SEMANTIC_PLACEMENT_CONFIG
+    if _SEMANTIC_PLACEMENT_CONFIG is None:
+        with open(SEMANTIC_PLACEMENT_CONFIG_PATH) as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(
+                f"Semantic placement config must be a mapping: "
+                f"{SEMANTIC_PLACEMENT_CONFIG_PATH}"
+            )
+        _SEMANTIC_PLACEMENT_CONFIG = loaded
+    return _SEMANTIC_PLACEMENT_CONFIG
+
+
+def _required_config_value(key: str) -> Any:
+    config = _load_semantic_placement_config()
+    if key not in config:
+        raise KeyError(f"Missing semantic placement config key: {key}")
+    return config[key]
+
+
+USE_CASE = str(_required_config_value("use_case"))
+REFINED_USE_CASE = str(_required_config_value("refined_use_case"))
+DEFAULT_SEMANTIC_MODE = str(_required_config_value("default_semantic_mode"))
+DEFAULT_FRAME_ID = str(_required_config_value("default_frame_id"))
+DEFAULT_RELATION_OFFSET_M = float(_required_config_value("default_relation_offset_m"))
+DEFAULT_EMPOWER_RELATION_OFFSET_M = float(
+    _required_config_value("default_empower_relation_offset_m")
+)
+SUPPORTED_DETECTOR_BACKENDS = tuple(
+    str(backend) for backend in _required_config_value("supported_detector_backends")
+)
+
+
+class EmpowerSemanticPlacementWrapper:
+    """Reusable Empower semantic placement runner.
+
+    Heavy shared state such as the Empower loader, NLP resources, and selected
+    detector model is initialized once here. Call ``run(...)`` for each new
+    RGB/point-cloud placement scene.
+    """
+
+    def __init__(
+        self,
+        *,
+        detector_backend: str,
+        frame_id: str = DEFAULT_FRAME_ID,
+        semantic_mode: str = DEFAULT_SEMANTIC_MODE,
+        relation_offset_m: float | None = None,
+        use_case: str | None = None,
+        images_root: str | os.PathLike[str] | None = None,
+        output_root: str | os.PathLike[str] | None = None,
+        preload_models: bool = True,
+    ) -> None:
+        _ensure_src_on_path()
+
+        self.semantic_mode = _coerce_semantic_mode(semantic_mode)
+        self.use_case = str(use_case or _use_case_for_semantic_mode(self.semantic_mode))
+        self.frame_id = frame_id
+        self.detector_backend = _coerce_detector_backend(detector_backend)
+        self.relation_offset_m = coerce_relation_offset_m(
+            relation_offset_m,
+            self.semantic_mode,
+        )
+        self.images_root = images_root
+        self.output_root = output_root
+
+        import loader
+        from detection import Detection
+
+        self.loader_instance = loader.Loader(self.use_case)
+        self.detection_instance = Detection()
+        if preload_models:
+            self.load_models()
+
+    def load_models(self) -> None:
+        """Load the selected detector backend once for reuse across runs."""
+
+        if self.detector_backend == "sam3":
+            _ = self.loader_instance.sam3_model
+            return
+
+        from models import YOLOW
+
+        if self.loader_instance.yolow_model is None:
+            self.loader_instance.yolow_model = YOLOW(self.loader_instance.YOLOW_PATH)
+
+    def run(
+        self,
+        *,
+        grasp_object: str,
+        image_path: str | os.PathLike[str],
+        pointcloud_path: str | os.PathLike[str],
+        camera_info_path: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run semantic placement for one scene and return the coordinate result."""
+
+        if not grasp_object or not str(grasp_object).strip():
+            raise ValueError("grasp_object is required for semantic placement")
+
+        image_path = _existing_path(image_path, "image_path")
+        pointcloud_path = _existing_path(pointcloud_path, "pointcloud_path")
+        camera_info = _resolve_camera_info_path(
+            camera_info_path=camera_info_path,
+            image_path=image_path,
+            pointcloud_path=pointcloud_path,
+        )
+
+        scan_dir, dump_dir = _stage_semantic_placement_inputs(
+            use_case=self.use_case,
+            image_path=image_path,
+            pointcloud_path=pointcloud_path,
+            camera_info_path=camera_info,
+            grasp_object=grasp_object,
+            images_root=self.images_root,
+            output_root=self.output_root,
+        )
+
+        loader_instance = _build_semantic_loader(
+            use_case=self.use_case,
+            scan_dir=scan_dir,
+            dump_dir=dump_dir,
+            grasp_object=str(grasp_object).strip(),
+            frame_id=self.frame_id,
+            detector_backend=self.detector_backend,
+            semantic_mode=self.semantic_mode,
+            relation_offset_m=self.relation_offset_m,
+            loader_instance=self.loader_instance,
+        )
+
+        self.detection_instance.set_loader(loader_instance)
+        return self.detection_instance.semantic_placement_result
 
 
 def run_semantic_placement(
@@ -31,51 +166,35 @@ def run_semantic_placement(
     grasp_object: str,
     image_path: str | os.PathLike[str],
     pointcloud_path: str | os.PathLike[str],
+    detector_backend: str,
     camera_info_path: str | os.PathLike[str] | None = None,
     frame_id: str = DEFAULT_FRAME_ID,
-    detector_backend: str = DEFAULT_DETECTOR_BACKEND,
-    use_case: str = USE_CASE,
+    semantic_mode: str = DEFAULT_SEMANTIC_MODE,
+    relation_offset_m: float | None = None,
+    use_case: str | None = None,
     images_root: str | os.PathLike[str] | None = None,
     output_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     """Run semantic placement from Python and return the coordinate result."""
 
-    if not grasp_object or not str(grasp_object).strip():
-        raise ValueError("grasp_object is required for semantic placement")
-
-    image_path = _existing_path(image_path, "image_path")
-    pointcloud_path = _existing_path(pointcloud_path, "pointcloud_path")
-    camera_info = _resolve_camera_info_path(
-        camera_info_path=camera_info_path,
-        image_path=image_path,
-        pointcloud_path=pointcloud_path,
-    )
-
-    scan_dir, dump_dir = _stage_semantic_placement_inputs(
+    wrapper = EmpowerSemanticPlacementWrapper(
+        frame_id=frame_id,
+        detector_backend=detector_backend,
+        semantic_mode=semantic_mode,
+        relation_offset_m=relation_offset_m,
         use_case=use_case,
-        image_path=image_path,
-        pointcloud_path=pointcloud_path,
-        camera_info_path=camera_info,
-        grasp_object=grasp_object,
         images_root=images_root,
         output_root=output_root,
     )
-
-    loader_instance = _build_semantic_loader(
-        use_case=use_case,
-        scan_dir=scan_dir,
-        dump_dir=dump_dir,
-        grasp_object=str(grasp_object).strip(),
-        frame_id=frame_id,
-        detector_backend=detector_backend,
+    return wrapper.run(
+        grasp_object=grasp_object,
+        image_path=image_path,
+        pointcloud_path=pointcloud_path,
+        camera_info_path=camera_info_path,
     )
 
-    _ensure_src_on_path()
-    from detection import Detection
 
-    detection_instance = Detection()
-    detection_instance.set_loader(loader_instance)
-    return detection_instance.semantic_placement_result
+SemanticPlacementWrapper = EmpowerSemanticPlacementWrapper
 
 
 def get_semantic_placement_coordinates_from_plan(
@@ -427,22 +546,79 @@ def _build_semantic_loader(
     grasp_object: str,
     frame_id: str,
     detector_backend: str,
+    semantic_mode: str,
+    relation_offset_m: float,
+    loader_instance: Any | None = None,
 ):
     _ensure_src_on_path()
-    import loader
+    if loader_instance is None:
+        import loader
 
-    loader_instance = loader.Loader(use_case)
+        loader_instance = loader.Loader(use_case)
     loader_instance.use_case = use_case
     loader_instance.SCAN_DIR = str(scan_dir) + os.sep
     loader_instance.DUMP_DIR = str(dump_dir) + os.sep
     loader_instance.grasp_object = grasp_object
     loader_instance.semantic_frame_id = frame_id
     loader_instance.detector_backend = _coerce_detector_backend(detector_backend)
+    loader_instance.semantic_mode = _coerce_semantic_mode(semantic_mode)
+    loader_instance.semantic_relation_offset_m = coerce_relation_offset_m(
+        relation_offset_m,
+        loader_instance.semantic_mode,
+    )
     return loader_instance
 
 
-def _coerce_detector_backend(detector_backend: str) -> str:
-    backend = str(detector_backend or DEFAULT_DETECTOR_BACKEND).strip().lower()
+def _coerce_semantic_mode(semantic_mode: str) -> str:
+    mode = str(semantic_mode or DEFAULT_SEMANTIC_MODE).strip().lower()
+    aliases = {
+        "refined": REFINED_USE_CASE,
+        "semantic_placement_refined": REFINED_USE_CASE,
+        "empower": USE_CASE,
+        "baseline": USE_CASE,
+        "original": USE_CASE,
+        "semantic_placement": USE_CASE,
+    }
+    if mode not in aliases:
+        raise ValueError(
+            "semantic_mode must be one of: semantic_placement_refined, "
+            "semantic_placement"
+        )
+    return aliases[mode]
+
+
+def _use_case_for_semantic_mode(semantic_mode: str) -> str:
+    return _coerce_semantic_mode(semantic_mode)
+
+
+def default_relation_offset_m(semantic_mode: str) -> float:
+    mode = _coerce_semantic_mode(semantic_mode)
+    if mode == USE_CASE:
+        return DEFAULT_EMPOWER_RELATION_OFFSET_M
+    return DEFAULT_RELATION_OFFSET_M
+
+
+def coerce_relation_offset_m(
+    relation_offset_m: float | None,
+    semantic_mode: str,
+) -> float:
+    if relation_offset_m is None:
+        return default_relation_offset_m(semantic_mode)
+
+    offset = float(relation_offset_m)
+    if not math.isfinite(offset) or offset < 0:
+        raise ValueError("relation_offset_m must be a finite non-negative distance")
+    return offset
+
+
+def _coerce_detector_backend(detector_backend: str | None) -> str:
+    if detector_backend is None or not str(detector_backend).strip():
+        raise ValueError(
+            "detector_backend is required; pass one of: "
+            f"{', '.join(SUPPORTED_DETECTOR_BACKENDS)}"
+        )
+
+    backend = str(detector_backend).strip().lower()
     aliases = {
         "sam": "sam3",
         "sam3": "sam3",
@@ -452,9 +628,10 @@ def _coerce_detector_backend(detector_backend: str) -> str:
         "yoloworld": "yolow",
         "yolow": "yolow",
     }
-    if backend not in aliases:
+    if backend not in aliases or aliases[backend] not in SUPPORTED_DETECTOR_BACKENDS:
         raise ValueError(
-            "detector_backend must be one of: sam3, yolow"
+            "detector_backend must be one of: "
+            f"{', '.join(SUPPORTED_DETECTOR_BACKENDS)}"
         )
     return aliases[backend]
 
@@ -741,9 +918,17 @@ def _normalize_reference_key(value: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_DETECTOR_BACKEND",
+    "DEFAULT_EMPOWER_RELATION_OFFSET_M",
+    "DEFAULT_SEMANTIC_MODE",
     "DEFAULT_RELATION_OFFSET_M",
     "DEFAULT_FRAME_ID",
+    "EmpowerSemanticPlacementWrapper",
+    "REFINED_USE_CASE",
+    "SemanticPlacementWrapper",
+    "SEMANTIC_PLACEMENT_CONFIG_PATH",
+    "SUPPORTED_DETECTOR_BACKENDS",
     "USE_CASE",
+    "coerce_relation_offset_m",
+    "default_relation_offset_m",
     "run_semantic_placement",
 ]

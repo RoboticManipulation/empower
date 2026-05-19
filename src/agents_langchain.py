@@ -127,6 +127,21 @@ _ACTION_INSTRUCTIONS = (
     "Write only the actions for the plan and nothing else."
 )
 
+_DROP_ONLY_ACTION_INSTRUCTIONS = (
+    "You must use only one action for the plan and nothing else:\n"
+    "DROP : place the already held object with respect to a visible reference object. "
+    "Use only the placement relations left, right, or on, for example "
+    "'DROP bottle left to mug', 'DROP bottle right to mug', or 'DROP bottle on table'.\n"
+    "Write only one DROP action line and nothing else."
+)
+
+
+def _action_instructions_for_task(task_description: str) -> str:
+    if "Use only one action line: DROP" in task_description:
+        return _DROP_ONLY_ACTION_INSTRUCTIONS
+    return _ACTION_INSTRUCTIONS
+
+
 _ROBOT_CONTEXT = (
     "You are a mobile robot with a base that allows you to move around the environment.\n"
     "You have a robotic arm with a gripper that allows you to pick up and place one object at a time.\n"
@@ -201,6 +216,7 @@ class Agents:
         Returns:
             String with sections '***RELATIONS***' and '***PLAN***'.
         """
+        action_instructions = _action_instructions_for_task(self.task_description)
         prompt = (
             f"{_ROBOT_CONTEXT}\n\n"
             "You are also very capable of describing a scene provided an image as input.\n"
@@ -210,7 +226,7 @@ class Agents:
             f"{_RELATIONS_INSTRUCTIONS}\n\n"
             "For the same task given in input, plan a sequence of actions to solve the task.\n"
             "Use univocal names given in the relations of the environment to specify objects.\n\n"
-            f"{_ACTION_INSTRUCTIONS}\n\n"
+            f"{action_instructions}\n\n"
             "The output must follow this format exactly:\n"
             "***RELATIONS***\n"
             "<list of relation triples>\n"
@@ -268,7 +284,7 @@ class Agents:
         )
         user_prompt = (
             f"The task is: {self.task_description}\n\n"
-            f"{_ACTION_INSTRUCTIONS}"
+            f"{_action_instructions_for_task(self.task_description)}"
         )
         plan = self._invoke_text(system_prompt, user_prompt)
 

@@ -1,0 +1,12 @@
+# Semantic placement wrapper defaults.
+
+use_case: "semantic_placement"
+refined_use_case: "semantic_placement_refined"
+default_semantic_mode: "semantic_placement_refined"
+default_frame_id: "gemini336_color_optical_frame"
+default_relation_offset_m: 0.15
+default_empower_relation_offset_m: 0.15
+
+supported_detector_backends:
+  - "sam3"
+  - "yolow"

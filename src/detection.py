@@ -9,7 +9,10 @@ import os
 import re
 from agents_langchain import Agents
 from semantic_placement_grounding import get_semantic_grasp_object
+from semantic_placement_grounding import is_semantic_placement_mode
 from semantic_placement_grounding import run_grounded_semantic_placement
+from semantic_placement_grounding import semantic_placement_empower_task_description
+from semantic_placement_grounding import semantic_placement_mode
 from semantic_placement_grounding import semantic_placement_prompt_objects
 from semantic_placement_grounding import semantic_placement_task_description
 
@@ -24,6 +27,12 @@ class Detection:
         task_description_jacket = "give me the green jacket from the clothing rack"
         task_description_semantic_placement = (
             "place the grasped object where it semantically belongs in the scene, "
+            "using only one DROP action with a relation such as left, right, "
+            "or on and a reference object, such as "
+            "'DROP grasped object left to cereal box'"
+        )
+        task_description_semantic_placement_refined = (
+            "place the grasped object where it semantically belongs in the scene, "
             "to the left or right of a similar visible object when open shelf space is visible"
         )
 
@@ -34,7 +43,8 @@ class Detection:
             "shelf_material": task_description_shelf,
             "recycle": task_description_diff,
             "jacket": task_description_jacket,
-            "semantic_placement": task_description_semantic_placement
+            "semantic_placement": task_description_semantic_placement,
+            "semantic_placement_refined": task_description_semantic_placement_refined,
         }
     
     def run_experiment(self):
@@ -44,10 +54,14 @@ class Detection:
             encoded_image = base64.b64encode(im_file.read()).decode("utf-8")
 
         task_description = self.task_dict[use_case]
-        if use_case == "semantic_placement":
-            task_description = semantic_placement_task_description(
-                get_semantic_grasp_object(self.loader_instance, required=True)
-            )
+        if is_semantic_placement_mode(use_case):
+            grasp_object = get_semantic_grasp_object(self.loader_instance, required=True)
+            if semantic_placement_mode(self.loader_instance) == "semantic_placement_refined":
+                task_description = semantic_placement_task_description(grasp_object)
+            else:
+                task_description = semantic_placement_empower_task_description(
+                    grasp_object
+                )
 
         agents = Agents(encoded_image, task_description)
         # self.single_agent_info = agents.single_agent() 
@@ -71,7 +85,7 @@ class Detection:
         self.loader_instance = loader_instance
         self.run_experiment()
         self.run_image(image_path=self.loader_instance.SCAN_DIR+"scan.jpg")
-        if self.loader_instance.use_case == "semantic_placement":
+        if is_semantic_placement_mode(self.loader_instance.use_case):
             self.run_semantic_placement()
         
     def split_word(self,words):
@@ -238,7 +252,11 @@ class Detection:
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
-        if getattr(self.loader_instance, "use_case", "") == "semantic_placement":
+        if (
+            is_semantic_placement_mode(getattr(self.loader_instance, "use_case", ""))
+            and semantic_placement_mode(self.loader_instance)
+            == "semantic_placement_refined"
+        ):
             grasp_object = get_semantic_grasp_object(
                 self.loader_instance,
                 required=False,
@@ -347,7 +365,7 @@ class Detection:
         candidates = []
         default_max_per_object = (
             "3"
-            if getattr(self.loader_instance, "use_case", "") == "semantic_placement"
+            if is_semantic_placement_mode(getattr(self.loader_instance, "use_case", ""))
             else "1"
         )
         max_per_object = int(

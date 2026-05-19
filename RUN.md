@@ -1,4 +1,107 @@
-# How to run Empower 
+## Semantic placement via Empower 
+
+
+### Refined semantic placement
+
+This runs the refined mode in `semantic_placement_refined`. It asks the LLM for
+one visible semantic reference, grounds that reference, and returns a
+camera-frame coordinate using the reference centroid plus the refined offset.
+
+#### Refined with SAM3
+
+```bash
+python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend sam3 \
+  --semantic-mode semantic_placement_refined \
+  --relation-offset-m 0.15 \
+  --no-window \
+  --write-prefix output/semantic_placement_compare/ketchup_rgb0_refined_sam3
+```
+
+#### Refined with YOLO-World
+
+```bash
+python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend yolow \
+  --semantic-mode semantic_placement_refined \
+  --relation-offset-m 0.15 \
+  --no-window \
+  --write-prefix output/semantic_placement_compare/ketchup_rgb3_refined_yolow
+```
+
+### Baseline semantic placement
+
+This runs the baseline mode in `semantic_placement`. It keeps the LLM/action
+style closer to the original planner, grounds the planned reference object
+centroid, applies original-style relation offsets, and returns the camera-frame
+coordinate instead of sending it to MoveIt.
+
+#### Baseline with SAM3
+
+```bash
+python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend sam3 \
+  --semantic-mode semantic_placement \
+  --relation-offset-m 0.15 \
+  --no-window \
+  --write-prefix output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
+```
+
+#### Baseline with YOLO-World
+
+```bash
+python3 src/visualize_semantic_placement.py \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
+  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
+  --grasp-object "ketchup bottle" \
+  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --detector-backend yolow \
+  --semantic-mode semantic_placement \
+  --relation-offset-m 0.15 \
+  --no-window \
+  --write-prefix output/semantic_placement_compare/ketchup_rgb3_baseline_yolow
+```
+
+
+For the two detector setups:
+
+  - SAM3: confidence threshold is 0.3
+      - Env override: EMPOWER_SAM3_SCORE_THR
+      - Code: src/detection.py:472
+  - YOLO-world: confidence threshold is 0.05
+      - Env override: EMPOWER_YOLOW_SCORE_THR
+      - Code: src/detection.py:492
+
+----
+ Current formula:
+
+  reference = centroid(reference object pointcloud)
+  offset = value passed by --relation-offset-m
+           default 0.15 for both semantic_placement_refined and semantic_placement
+
+  left:
+    coordinate = [reference_x - offset, reference_y, reference_z]
+
+  right:
+    coordinate = [reference_x + offset, reference_y, reference_z]
+
+
+
+
+
+# IGNORE THE BELOW
 
 
 ---
@@ -72,51 +175,3 @@ USE_CASE=order_by_height python3 color_pcl_local.py
 ```
 
 
-## Whole pipeline in one go
-
-Example with SAM3 (default):
-
-```bash
-bash -ic 'python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
-  --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend sam3 \
-  --no-window \
-  --write-prefix output/semantic_placement_demo/ketchup_bottle_sam3'
-```
-
-Example with YOLO-World:
-
-```bash
-bash -ic 'python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
-  --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend yolow \
-  --no-window \
-  --write-prefix output/semantic_placement_demo/ketchup_bottle_yolow'
-```
-
-
-For the two detector setups:
-
-  - SAM3: confidence threshold is 0.3
-      - Env override: EMPOWER_SAM3_SCORE_THR
-      - Code: src/detection.py:454
-  - YOLO-world: confidence threshold is 0.05
-      - Env override: EMPOWER_YOLOW_SCORE_THR
-      - Code: src/detection.py:474
-
-----
- Current formula:
-
-  reference = centroid(reference object pointcloud)
-
-  left:
-    coordinate = [reference_x - 0.15, reference_y, reference_z]
-
-  right:
-    coordinate = [reference_x + 0.15, reference_y, reference_z]
