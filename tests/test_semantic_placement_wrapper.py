@@ -7,11 +7,7 @@ import types
 import numpy as np
 import pytest
 
-
-EMPOWER_SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(EMPOWER_SRC))
-
-from semantic_placement_wrapper import run_semantic_placement  # noqa: E402
+from empower.semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
 def test_run_semantic_placement_calls_high_level_wrapper_only(
@@ -71,13 +67,21 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
         types.SimpleNamespace(Detection=FakeDetection),
     )
 
-    result = run_semantic_placement(
+    wrapper = EmpowerSemanticPlacementWrapper(
+        detector_backend="sam3",
+        frame_id="gemini336_color_optical_frame",
+        semantic_mode="semantic_placement",
+        relation_offset_m=0.15,
+        use_case="semantic_placement",
+        images_root=images_root,
+        output_root=output_root,
+        preload_models=False,
+    )
+    result = wrapper.run(
         grasp_object="milk carton",
         image_path=image_path,
         pointcloud_path=pointcloud_path,
         camera_info_path=camera_info_path,
-        images_root=images_root,
-        output_root=output_root,
     )
 
     assert result == {"coordinates": [1.0, 2.0, 3.0], "grasp_object": "milk carton"}

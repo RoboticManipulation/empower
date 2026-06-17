@@ -1,0 +1,4 @@
+include LICENSE
+include requirements-container.txt
+recursive-include config *
+recursive-include configs *.yaml
