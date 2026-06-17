@@ -10,31 +10,31 @@ camera-frame coordinate using the reference centroid plus the refined offset.
 #### Refined with SAM3
 
 ```bash
-python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend sam3 \
   --semantic-mode semantic_placement_refined \
   --relation-offset-m 0.15 \
   --no-window \
-  --write-prefix output/semantic_placement_compare/ketchup_rgb0_refined_sam3
+  --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb0_refined_sam3
 ```
 
 #### Refined with YOLO-World
 
 ```bash
-python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
+python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend yolow \
   --semantic-mode semantic_placement_refined \
   --relation-offset-m 0.15 \
   --no-window \
-  --write-prefix output/semantic_placement_compare/ketchup_rgb3_refined_yolow
+  --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_refined_yolow
 ```
 
 ### Baseline semantic placement
@@ -47,31 +47,31 @@ coordinate instead of sending it to MoveIt.
 #### Baseline with SAM3
 
 ```bash
-python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
+python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend sam3 \
   --semantic-mode semantic_placement \
   --relation-offset-m 0.15 \
   --no-window \
-  --write-prefix output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
+  --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
 ```
 
 #### Baseline with YOLO-World
 
 ```bash
-python3 src/visualize_semantic_placement.py \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
-  geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
+python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_3.png \
+  ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
-  --camera-info geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend yolow \
   --semantic-mode semantic_placement \
   --relation-offset-m 0.15 \
   --no-window \
-  --write-prefix output/semantic_placement_compare/ketchup_rgb3_baseline_yolow
+  --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_yolow
 ```
 
 

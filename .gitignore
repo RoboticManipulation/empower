@@ -181,8 +181,7 @@ config/yolow/yolow1.pth
 devel/
 images/
 logs/
-output/
+#output/
 rosbags/
 config/yolow/*
 configs/llm_config.yaml
-geo_sem_place_dataset
