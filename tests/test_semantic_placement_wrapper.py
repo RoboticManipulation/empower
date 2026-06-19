@@ -32,8 +32,8 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
     seen: dict[str, object] = {}
 
     class FakeLoader:
-        def __init__(self, use_case: str) -> None:
-            self.use_case = use_case
+        def __init__(self, task_name: str) -> None:
+            self.task_name = task_name
 
     class FakeDetection:
         def set_loader(self, loader_instance: FakeLoader) -> None:
@@ -41,13 +41,12 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
             scan_dir = Path(loader_instance.SCAN_DIR)
             seen.update(
                 {
-                    "use_case": loader_instance.use_case,
+                    "task_name": loader_instance.task_name,
                     "grasp_object": loader_instance.grasp_object,
                     "frame_id": loader_instance.semantic_frame_id,
+                    "mode": loader_instance.mode,
                     "scan_exists": (scan_dir / "scan.jpg").exists(),
-                    "pointcloud_text": (
-                        dump_dir / "depth_pointcloud.pcd"
-                    ).read_text(),
+                    "pointcloud_exists": (dump_dir / "depth_pointcloud.pcd").exists(),
                     "camera_exists": (dump_dir / "camera_info.json").exists(),
                     "camera_text": (dump_dir / "camera_info.json").read_text(),
                     "grasp_file_text": (
@@ -69,28 +68,29 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
 
     wrapper = EmpowerSemanticPlacementWrapper(
         detector_backend="sam3",
-        frame_id="gemini336_color_optical_frame",
-        semantic_mode="semantic_placement",
+        mode="original",
         relation_offset_m=0.15,
-        use_case="semantic_placement",
-        images_root=images_root,
-        output_root=output_root,
         preload_models=False,
     )
-    result = wrapper.run(
+    wrapper.set_inputs(
         grasp_object="milk carton",
-        image_path=image_path,
-        pointcloud_path=pointcloud_path,
-        camera_info_path=camera_info_path,
+        image=image_path,
+        pointcloud=np.array([[0.0, 0.0, 0.0]]),
+        camera_info=camera_info_path,
+        frame_id="gemini336_color_optical_frame",
+        images_root=images_root,
+        output_root=output_root,
     )
+    result = wrapper.run()
 
     assert result == {"coordinates": [1.0, 2.0, 3.0], "grasp_object": "milk carton"}
     assert seen == {
-        "use_case": "semantic_placement",
+        "task_name": "semantic_placement",
         "grasp_object": "milk carton",
         "frame_id": "gemini336_color_optical_frame",
+        "mode": "original",
         "scan_exists": True,
-        "pointcloud_text": "fake point cloud",
+        "pointcloud_exists": True,
         "camera_exists": True,
         "camera_text": '{"fx": 1, "fy": 1, "cx": 0, "cy": 0}',
         "grasp_file_text": "milk carton",

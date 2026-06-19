@@ -3,7 +3,7 @@
 
 ### Refined semantic placement
 
-This runs the refined mode in `semantic_placement_refined`. It asks the LLM for
+This runs `--mode refined`. It asks the LLM for
 one visible semantic reference, grounds that reference, and returns a
 camera-frame coordinate using the reference centroid plus the refined offset.
 
@@ -16,7 +16,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend sam3 \
-  --semantic-mode semantic_placement_refined \
+  --mode refined \
   --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb0_refined_sam3
@@ -31,7 +31,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend yolow \
-  --semantic-mode semantic_placement_refined \
+  --mode refined \
   --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_refined_yolow
@@ -39,7 +39,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
 
 ### Baseline semantic placement
 
-This runs the baseline mode in `semantic_placement`. It keeps the LLM/action
+This runs `--mode original`. It keeps the LLM/action
 style closer to the original planner, grounds the planned reference object
 centroid, applies original-style relation offsets, and returns the camera-frame
 coordinate instead of sending it to MoveIt.
@@ -53,7 +53,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend sam3 \
-  --semantic-mode semantic_placement \
+  --mode original \
   --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
@@ -68,7 +68,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
   --detector-backend yolow \
-  --semantic-mode semantic_placement \
+  --mode original \
   --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_yolow

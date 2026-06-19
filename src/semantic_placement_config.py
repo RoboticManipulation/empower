@@ -34,9 +34,9 @@ def required_config_value(key: str) -> Any:
     return config[key]
 
 
-USE_CASE = str(required_config_value("use_case"))
-REFINED_USE_CASE = str(required_config_value("refined_use_case"))
-DEFAULT_SEMANTIC_MODE = str(required_config_value("default_semantic_mode"))
+ORIGINAL_MODE = str(required_config_value("original_mode"))
+REFINED_MODE = str(required_config_value("refined_mode"))
+DEFAULT_MODE = str(required_config_value("default_mode"))
 DEFAULT_FRAME_ID = str(required_config_value("default_frame_id"))
 DEFAULT_RELATION_OFFSET_M = float(required_config_value("default_relation_offset_m"))
 DEFAULT_EMPOWER_RELATION_OFFSET_M = float(
@@ -45,23 +45,18 @@ DEFAULT_EMPOWER_RELATION_OFFSET_M = float(
 SUPPORTED_DETECTOR_BACKENDS = tuple(
     str(backend) for backend in required_config_value("supported_detector_backends")
 )
-
-
-def is_semantic_placement_mode(value: str | None) -> bool:
-    return value in {USE_CASE, REFINED_USE_CASE}
-
-
+SUPPORTED_SEMANTIC_PLACEMENT_MODES = (ORIGINAL_MODE, REFINED_MODE)
 __all__ = [
     "DEFAULT_EMPOWER_RELATION_OFFSET_M",
     "DEFAULT_FRAME_ID",
+    "DEFAULT_MODE",
     "DEFAULT_RELATION_OFFSET_M",
-    "DEFAULT_SEMANTIC_MODE",
-    "REFINED_USE_CASE",
+    "ORIGINAL_MODE",
+    "REFINED_MODE",
     "ROOT_DIR",
     "SEMANTIC_PLACEMENT_CONFIG_PATH",
     "SUPPORTED_DETECTOR_BACKENDS",
-    "USE_CASE",
-    "is_semantic_placement_mode",
+    "SUPPORTED_SEMANTIC_PLACEMENT_MODES",
     "load_semantic_placement_config",
     "required_config_value",
 ]

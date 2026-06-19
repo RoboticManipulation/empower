@@ -8,10 +8,10 @@ import math
 import os
 import re
 from agents_langchain import Agents
-from semantic_placement_config import is_semantic_placement_mode
+from semantic_placement_config import REFINED_MODE
+from semantic_placement_config import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_grounding import get_semantic_grasp_object
 from semantic_placement_grounding import run_grounded_semantic_placement
-from semantic_placement_grounding import semantic_placement_mode
 from semantic_placement_prompts import semantic_placement_empower_task_description
 from semantic_placement_prompts import semantic_placement_prompt_objects
 from semantic_placement_prompts import semantic_placement_refined_task_description
@@ -31,11 +31,6 @@ class Detection:
             "or on and a reference object, such as "
             "'DROP grasped object left to cereal box'"
         )
-        task_description_semantic_placement_refined = (
-            "place the grasped object where it semantically belongs in the scene, "
-            "to the left or right of a similar visible object when open shelf space is visible"
-        )
-
         self.task_dict = {
             "order_by_height": task_description_order,
             "exit": task_description_exit,
@@ -44,19 +39,18 @@ class Detection:
             "recycle": task_description_diff,
             "jacket": task_description_jacket,
             "semantic_placement": task_description_semantic_placement,
-            "semantic_placement_refined": task_description_semantic_placement_refined,
         }
     
     def run_experiment(self):
-        use_case = self.loader_instance.use_case
+        task_name = self.loader_instance.task_name
         image_path = self.loader_instance.SCAN_DIR+"scan.jpg"
         with open(image_path, "rb") as im_file:
             encoded_image = base64.b64encode(im_file.read()).decode("utf-8")
 
-        task_description = self.task_dict[use_case]
-        if is_semantic_placement_mode(use_case):
+        task_description = self.task_dict[task_name]
+        if task_name == "semantic_placement":
             grasp_object = get_semantic_grasp_object(self.loader_instance, required=True)
-            if semantic_placement_mode(self.loader_instance) == "semantic_placement_refined":
+            if self._semantic_mode() == REFINED_MODE:
                 task_description = semantic_placement_refined_task_description(grasp_object)
             else:
                 task_description = semantic_placement_empower_task_description(
@@ -85,8 +79,11 @@ class Detection:
         self.loader_instance = loader_instance
         self.run_experiment()
         self.run_image(image_path=self.loader_instance.SCAN_DIR+"scan.jpg")
-        if is_semantic_placement_mode(self.loader_instance.use_case):
+        if self._semantic_mode() in SUPPORTED_SEMANTIC_PLACEMENT_MODES:
             self.run_semantic_placement()
+
+    def _semantic_mode(self):
+        return getattr(self.loader_instance, "mode", None)
         
     def split_word(self,words):
         splitted_word = []
@@ -252,11 +249,7 @@ class Detection:
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
-        if (
-            is_semantic_placement_mode(getattr(self.loader_instance, "use_case", ""))
-            and semantic_placement_mode(self.loader_instance)
-            == "semantic_placement_refined"
-        ):
+        if self._semantic_mode() == REFINED_MODE:
             grasp_object = get_semantic_grasp_object(
                 self.loader_instance,
                 required=False,
@@ -365,7 +358,7 @@ class Detection:
         candidates = []
         default_max_per_object = (
             "3"
-            if is_semantic_placement_mode(getattr(self.loader_instance, "use_case", ""))
+            if self._semantic_mode() in SUPPORTED_SEMANTIC_PLACEMENT_MODES
             else "1"
         )
         max_per_object = int(

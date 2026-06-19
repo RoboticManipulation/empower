@@ -12,8 +12,6 @@ import numpy as np
 from semantic_placement_config import DEFAULT_EMPOWER_RELATION_OFFSET_M
 from semantic_placement_config import DEFAULT_FRAME_ID
 from semantic_placement_config import DEFAULT_RELATION_OFFSET_M
-from semantic_placement_config import USE_CASE
-
 
 def get_semantic_placement_coordinates_from_plan(
     planning_text: str,
@@ -85,7 +83,6 @@ def get_semantic_placement_coordinates(
     roll, pitch, yaw = _coerce_rpy(orientation_rpy)
 
     return {
-        "use_case": USE_CASE,
         "grasp_object": grasp_object,
         "normalized_grasp_object": _normalize_result_name(grasp_object),
         "frame_id": frame_id,

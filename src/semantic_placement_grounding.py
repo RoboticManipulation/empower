@@ -6,8 +6,8 @@ import json
 import os
 from typing import Any, Mapping
 
-from semantic_placement_config import is_semantic_placement_mode
-from semantic_placement_config import REFINED_USE_CASE
+from semantic_placement_config import DEFAULT_MODE
+from semantic_placement_config import REFINED_MODE
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 from semantic_placement_reference_geometry import get_semantic_reference_geometry
@@ -42,7 +42,7 @@ def run_grounded_semantic_placement(
     mode = semantic_placement_mode(loader_instance)
     relation_offset_m = semantic_relation_offset_m(loader_instance)
 
-    if mode == REFINED_USE_CASE:
+    if mode == REFINED_MODE:
         result = get_semantic_placement_coordinates_from_plan(
             planning_text,
             placement_pointclouds=placement_pointcloud,
@@ -61,8 +61,7 @@ def run_grounded_semantic_placement(
             frame_id=semantic_frame_id(loader_instance),
         )
 
-    result["semantic_mode"] = mode
-    result["use_case"] = getattr(loader_instance, "use_case", mode)
+    result["mode"] = mode
     result["relation_offset_m"] = relation_offset_m
 
     result_path = os.path.join(
@@ -78,11 +77,7 @@ def run_grounded_semantic_placement(
 
 
 def semantic_placement_mode(loader_instance: Any) -> str:
-    return (
-        getattr(loader_instance, "semantic_mode", None)
-        or getattr(loader_instance, "use_case", None)
-        or REFINED_USE_CASE
-    )
+    return getattr(loader_instance, "mode", None) or DEFAULT_MODE
 
 
 def semantic_relation_offset_m(loader_instance: Any) -> float:
@@ -129,7 +124,6 @@ def semantic_frame_id(loader_instance: Any) -> str:
 
 __all__ = [
     "get_semantic_grasp_object",
-    "is_semantic_placement_mode",
     "run_grounded_semantic_placement",
     "semantic_frame_id",
     "semantic_placement_mode",

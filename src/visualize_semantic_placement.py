@@ -4,16 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 from importlib import import_module
 from pathlib import Path
 
-import numpy as np
-import open3d as o3d
-
 from semantic_placement_config import DEFAULT_FRAME_ID
-from semantic_placement_config import DEFAULT_SEMANTIC_MODE
+from semantic_placement_config import DEFAULT_MODE
 from semantic_placement_config import SUPPORTED_DETECTOR_BACKENDS
+from semantic_placement_config import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
@@ -30,70 +27,33 @@ def main() -> None:
         segmentation = _create_segmentation()
 
     wrapper = EmpowerSemanticPlacementWrapper(
-        frame_id=args.frame_id,
         detector_backend=args.detector_backend,
-        semantic_mode=args.semantic_mode,
+        mode=args.mode,
         relation_offset_m=args.relation_offset_m,
-        use_case=args.semantic_mode,
-        images_root=args.images_root,
-        output_root=args.output_root,
         segmentation=segmentation,
     )
-    result = wrapper.run(
+    wrapper.set_inputs(
         grasp_object=args.grasp_object,
-        image_path=args.image,
-        pointcloud_path=args.pointcloud,
-        camera_info_path=args.camera_info,
+        image=args.image,
+        pointcloud=args.pointcloud,
+        camera_info=args.camera_info,
+        frame_id=args.frame_id,
+        images_root=args.images_root,
+        output_root=args.output_root,
     )
-
-    pointcloud = _load_pointcloud(args.pointcloud, args.voxel_size)
-    coordinate = _as_point(result["coordinates"])
-    surface = _surface_from_result(result)
-
-    geometries: list[o3d.geometry.Geometry] = [pointcloud]
-    geometries.append(_sphere(coordinate, args.marker_radius, (1.0, 0.05, 0.05)))
-
-    if surface is not None and not np.allclose(coordinate, surface):
-        geometries.append(_sphere(surface, args.marker_radius * 0.65, (0.05, 0.8, 0.1)))
-        geometries.append(_line(surface, coordinate, (1.0, 0.8, 0.05)))
-
-    geometries.append(
-        o3d.geometry.TriangleMesh.create_coordinate_frame(
-            size=args.marker_radius * 5.0,
-            origin=coordinate,
-        )
+    wrapper.run()
+    wrapper.save_outputs(
+        write_prefix=args.write_prefix,
+        voxel_size=args.voxel_size,
+        marker_radius=args.marker_radius,
+        show_window=not args.no_window,
     )
-
-    print(f"[OK] grasp object: {result.get('grasp_object', args.grasp_object)}")
-    print(f"[OK] frame_id    : {result.get('frame_id', args.frame_id)}")
-    if "relation_offset_m" in result:
-        print(f"[OK] offset_m    : {float(result['relation_offset_m']):.4f}")
-    print(f"[OK] coordinate  : {_fmt_point(coordinate)}")
-
-    if args.write_prefix:
-        _write_marker_files(args.write_prefix, pointcloud, geometries[1:])
-        if args.camera_info is not None:
-            _write_image_overlay(
-                args.write_prefix,
-                image_path=args.image,
-                camera_info_path=args.camera_info,
-                coordinate=coordinate,
-                label=result.get("grasp_object", args.grasp_object),
-            )
-        else:
-            print("[WARN] --camera-info not provided; skipping 2D image overlay")
-
-    if not args.no_window:
-        o3d.visualization.draw_geometries(
-            geometries,
-            window_name="Empower Semantic Placement",
-        )
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Call EmpowerSemanticPlacementWrapper.run(...) and show the returned placement "
+            "Set semantic placement inputs, run prediction, and show the returned placement "
             "coordinate in the input point cloud. Red sphere = returned coordinate."
         )
     )
@@ -122,17 +82,12 @@ def _parse_args() -> argparse.Namespace:
         help="Prompt-conditioned detector backend to use for grounding",
     )
     parser.add_argument(
-        "--semantic-mode",
-        "--placement-mode",
-        choices=(
-            "semantic_placement_refined",
-            "semantic_placement",
-        ),
-        default=DEFAULT_SEMANTIC_MODE,
+        "--mode",
+        choices=SUPPORTED_SEMANTIC_PLACEMENT_MODES,
+        default=DEFAULT_MODE,
         help=(
-            "semantic_placement_refined uses the refined single-reference "
-            "logic; semantic_placement uses the original Empower-style plan "
-            "and centroid offsets"
+            "refined uses the refined single-reference logic; original uses "
+            "the original Empower-style plan and centroid offsets"
         ),
     )
     parser.add_argument(
@@ -140,9 +95,7 @@ def _parse_args() -> argparse.Namespace:
         "--offset-m",
         type=float,
         required=True,
-        help=(
-            "Left/right placement offset in meters."
-        ),
+        help="Left/right placement offset in meters.",
     )
     parser.add_argument(
         "--images-root",
@@ -177,185 +130,6 @@ def _parse_args() -> argparse.Namespace:
         help="Only run wrapper and print/write files; do not open Open3D",
     )
     return parser.parse_args()
-
-
-def _load_pointcloud(path: Path, voxel_size: float) -> o3d.geometry.PointCloud:
-    pointcloud = o3d.io.read_point_cloud(str(path))
-    if pointcloud.is_empty():
-        raise SystemExit(f"[ERROR] Empty or unreadable point cloud: {path}")
-
-    if voxel_size > 0:
-        pointcloud = pointcloud.voxel_down_sample(voxel_size)
-
-    if not pointcloud.has_colors():
-        pointcloud.paint_uniform_color((0.55, 0.55, 0.55))
-
-    return pointcloud
-
-
-def _surface_from_result(result: dict) -> np.ndarray | None:
-    surface = result.get("surface_position")
-    if surface is None:
-        return None
-    if isinstance(surface, dict):
-        surface = [surface["x"], surface["y"], surface["z"]]
-    return _as_point(surface)
-
-
-def _as_point(values: object) -> np.ndarray:
-    point = np.asarray(values, dtype=float)
-    if point.shape != (3,) or not np.isfinite(point).all():
-        raise SystemExit(f"[ERROR] Expected finite XYZ point, got {values!r}")
-    return point
-
-
-def _sphere(
-    center: np.ndarray,
-    radius: float,
-    color: tuple[float, float, float],
-) -> o3d.geometry.TriangleMesh:
-    marker = o3d.geometry.TriangleMesh.create_sphere(radius=radius)
-    marker.translate(center)
-    marker.paint_uniform_color(color)
-    marker.compute_vertex_normals()
-    return marker
-
-
-def _line(
-    start: np.ndarray,
-    end: np.ndarray,
-    color: tuple[float, float, float],
-) -> o3d.geometry.LineSet:
-    line = o3d.geometry.LineSet(
-        points=o3d.utility.Vector3dVector([start, end]),
-        lines=o3d.utility.Vector2iVector([[0, 1]]),
-    )
-    line.colors = o3d.utility.Vector3dVector([color])
-    return line
-
-
-def _write_marker_files(
-    prefix: Path,
-    pointcloud: o3d.geometry.PointCloud,
-    markers: list[o3d.geometry.Geometry],
-) -> None:
-    prefix.parent.mkdir(parents=True, exist_ok=True)
-    scene_path = prefix.with_name(prefix.name + "_scene.ply")
-    o3d.io.write_point_cloud(str(scene_path), pointcloud)
-    print(f"[OK] wrote {scene_path}")
-
-    for idx, marker in enumerate(markers):
-        marker_path = prefix.with_name(prefix.name + f"_marker_{idx}.ply")
-        if isinstance(marker, o3d.geometry.TriangleMesh):
-            o3d.io.write_triangle_mesh(str(marker_path), marker)
-        elif isinstance(marker, o3d.geometry.LineSet):
-            o3d.io.write_line_set(str(marker_path), marker)
-        print(f"[OK] wrote {marker_path}")
-
-
-def _write_image_overlay(
-    prefix: Path,
-    *,
-    image_path: Path,
-    camera_info_path: Path,
-    coordinate: np.ndarray,
-    label: str,
-) -> None:
-    import cv2
-
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise SystemExit(f"[ERROR] Unable to read image for overlay: {image_path}")
-
-    intrinsics = _load_intrinsics(camera_info_path)
-    pixel = _project_point_to_image(coordinate, intrinsics, image.shape[:2])
-    if pixel is None:
-        print(
-            "[WARN] placement coordinate projects outside the image; "
-            "skipping 2D image overlay"
-        )
-        return
-
-    x, y = pixel
-    radius = max(10, min(image.shape[:2]) // 45)
-    color = (0, 0, 255)
-    cv2.circle(image, (x, y), radius, color, thickness=3)
-    cv2.drawMarker(
-        image,
-        (x, y),
-        color,
-        markerType=cv2.MARKER_CROSS,
-        markerSize=radius * 3,
-        thickness=3,
-    )
-    text = f"place {label} here"
-    cv2.putText(
-        image,
-        text,
-        (min(x + radius + 8, image.shape[1] - 1), max(y - radius, 24)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-
-    output_path = prefix.with_name(prefix.name + "_placement_2d.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(output_path), image):
-        raise SystemExit(f"[ERROR] Unable to write 2D overlay: {output_path}")
-    print(f"[OK] wrote {output_path}")
-
-
-def _load_intrinsics(path: Path) -> dict[str, float]:
-    with path.open("r", encoding="utf-8") as intrinsics_file:
-        info = json.load(intrinsics_file)
-
-    if "K" in info:
-        return {
-            "fx": float(info["K"][0]),
-            "fy": float(info["K"][4]),
-            "cx": float(info["K"][2]),
-            "cy": float(info["K"][5]),
-        }
-
-    if "camera_matrix" in info and "data" in info["camera_matrix"]:
-        matrix = info["camera_matrix"]["data"]
-        return {
-            "fx": float(matrix[0]),
-            "fy": float(matrix[4]),
-            "cx": float(matrix[2]),
-            "cy": float(matrix[5]),
-        }
-
-    required = ("fx", "fy", "cx", "cy")
-    if all(key in info for key in required):
-        return {key: float(info[key]) for key in required}
-
-    raise SystemExit(
-        f"[ERROR] {path} must contain fx/fy/cx/cy, K, or camera_matrix.data"
-    )
-
-
-def _project_point_to_image(
-    point: np.ndarray,
-    intrinsics: dict[str, float],
-    image_shape: tuple[int, int],
-) -> tuple[int, int] | None:
-    height, width = image_shape
-    for z_sign in (1.0, -1.0):
-        z = float(point[2]) * z_sign
-        if abs(z) < 1e-9:
-            continue
-        u = int(round(intrinsics["fx"] * float(point[0]) / z + intrinsics["cx"]))
-        v = int(round(intrinsics["fy"] * float(point[1]) / z + intrinsics["cy"]))
-        if 0 <= u < width and 0 <= v < height:
-            return u, v
-    return None
-
-
-def _fmt_point(point: np.ndarray) -> str:
-    return "[" + ", ".join(f"{value:.4f}" for value in point) + "]"
 
 
 if __name__ == "__main__":
