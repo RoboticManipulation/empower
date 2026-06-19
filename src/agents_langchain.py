@@ -1,5 +1,4 @@
 import os
-import yaml
 from pathlib import Path
 from typing import Tuple
 
@@ -7,18 +6,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_mistralai import ChatMistralAI
 
+from utils.common_utils import get_config, read_yaml
+
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
 
 _ROOT = Path(__file__).resolve().parent.parent
-_MASTER_CFG_PATH = _ROOT / "configs" / "llm_config.yaml"
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-
-
-def _load_yaml(path: Path) -> dict:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
 
 
 def _resolve_api_key(env_var: str) -> str:
@@ -175,7 +170,7 @@ class Agents:
         self.encoded_image = image
         self.task_description = task_description
 
-        master_cfg = _load_yaml(_MASTER_CFG_PATH)
+        master_cfg = get_config("llm_config")
         self.provider = master_cfg["llm_provider"]
 
         llm_cfg_path = _ROOT / "configs" / "llm" / f"{self.provider}.yaml"
@@ -184,7 +179,7 @@ class Agents:
                 f"LLM config not found: {llm_cfg_path}\n"
                 f"Expected a file named '{self.provider}.yaml' in configs/llm/."
             )
-        llm_cfg = _load_yaml(llm_cfg_path)
+        llm_cfg = read_yaml(llm_cfg_path)
 
         # Two LLM instances: one with vision for scene understanding, one text-only for planning.
         # For OpenAI the same model handles both; for Mixtral, Pixtral handles vision.

@@ -14,7 +14,6 @@ Usage (no roscore needed):
     python3 color_pcl_local.py
 """
 
-import json
 import os
 import pickle
 import sys
@@ -25,6 +24,7 @@ import open3d as o3d
 from matplotlib.colors import to_rgb
 
 from paths import IMAGES_DIR, OUTPUT_DIR
+from utils.common_utils import read_json
 
 USE_CASE = os.environ.get("USE_CASE", "order_by_height")
 SCAN_DIR = IMAGES_DIR + USE_CASE + "/"
@@ -45,8 +45,7 @@ def load_intrinsics() -> tuple:
             f"[ERROR] {cam_path} not found.\n"
             "Run prepare_local_data.py first, or edit INTRINSICS in that script."
         )
-    with open(cam_path) as f:
-        info = json.load(f)
+    info = read_json(cam_path)
     fx = float(info["fx"])
     fy = float(info["fy"])
     cx = float(info["cx"])

@@ -1,0 +1,9 @@
+frame_id: "gemini336_color_optical_frame"
+
+mode:
+  original:
+    relation_offset_m: 0.15
+    detector_backend: "sam3"
+  refined:
+    relation_offset_m: 0.15
+    detector_backend: "sam3"

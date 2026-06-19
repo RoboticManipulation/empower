@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Mapping
 
+from utils.common_utils import save_json
 from utils.config_utils import DEFAULT_MODE
 from utils.config_utils import REFINED_MODE
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
@@ -68,8 +68,7 @@ def run_grounded_semantic_placement(
         loader_instance.DUMP_DIR,
         "semantic_placement_result.json",
     )
-    with open(result_path, "w") as f:
-        json.dump(json_ready(result), f, indent=2)
+    save_json(result_path, json_ready(result))
 
     print(f"[OK] Semantic placement result -> {result_path}")
     print(f"[OK] Semantic placement coordinates: {result['coordinates']}")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Mapping
 
@@ -10,6 +9,7 @@ import cv2
 import numpy as np
 
 from semantic_placement_geometry import normalize_text_name
+from utils.common_utils import read_json
 
 
 def load_pointcloud_points(pcd_path: str) -> np.ndarray:
@@ -95,8 +95,7 @@ def load_camera_intrinsics(loader_instance: Any) -> dict[str, float] | None:
     if not os.path.exists(cam_path):
         return None
 
-    with open(cam_path) as f:
-        info = json.load(f)
+    info = read_json(cam_path)
 
     if "K" in info:
         return {

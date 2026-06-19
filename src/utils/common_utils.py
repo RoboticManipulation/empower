@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import yaml
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -12,12 +13,56 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 
-from utils.config_utils import DEFAULT_FRAME_ID
-
-
 ImageInput = str | os.PathLike[str] | np.ndarray | Image.Image
 PointCloudInput = str | os.PathLike[str] | o3d.geometry.PointCloud | np.ndarray
 CameraInfoInput = str | os.PathLike[str] | Mapping[str, Any] | None
+
+def read_json(path: str) -> dict:
+    path = os.path.abspath(path)
+    try:
+        with open(path) as file:
+            return json.load(file)
+    except FileNotFoundError:
+        print(f"Error: File not found: {path}")
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in {path} – {e}")
+    except Exception as e:
+        print(f"Error reading {path}: {e}")
+    return None
+
+def save_json(path, data):
+    path = os.path.abspath(path)
+    with open(path, "w") as outfile:
+        json.dump(data, outfile, indent=4)
+
+def save_yaml(path, data):
+    path = os.path.abspath(path)
+    with open(path, 'w') as outfile:
+        yaml.dump(data, outfile, default_flow_style=False, indent=2, sort_keys=False, width=float("inf"))
+
+def read_yaml(path):
+    path = os.path.abspath(path)
+    with open(path, 'r') as file:
+        data = yaml.safe_load(file)
+    return data
+
+def get_root_dir_path():
+    current_file = Path(__file__).resolve()
+    root_dir = current_file.parents[2]
+    return root_dir
+
+def get_config_dir_path():
+    current_dir = get_root_dir_path()
+    config_dir = current_dir / "configs"
+    return config_dir
+
+def get_config(config_name: str) -> str:
+    config_dir_path = get_config_dir_path()
+    config_file = config_name + ".yaml"
+    config = read_yaml(config_dir_path / config_file)
+    return config
+
+DEFAULT_FRAME_ID = str(get_config("semantic_placement")["default_frame_id"])
 
 
 def existing_path(path: str | os.PathLike[str], name: str) -> Path:
@@ -73,8 +118,7 @@ def load_camera_info(camera_info: CameraInfoInput) -> dict[str, Any] | None:
     if camera_info is None:
         return None
     if isinstance(camera_info, (str, os.PathLike)):
-        with open(existing_path(camera_info, "camera_info"), encoding="utf-8") as camera_file:
-            loaded = json.load(camera_file)
+        loaded = read_json(existing_path(camera_info, "camera_info"))
     elif isinstance(camera_info, Mapping):
         loaded = dict(camera_info)
     else:
@@ -149,8 +193,7 @@ def write_pointcloud(pointcloud: o3d.geometry.PointCloud, destination_path: Path
 
 def write_camera_info(camera_info: Mapping[str, Any], destination_path: Path) -> None:
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    with destination_path.open("w", encoding="utf-8") as camera_file:
-        json.dump(dict(camera_info), camera_file, indent=2)
+    save_json(destination_path, dict(camera_info))
 
 
 def stage_semantic_placement_inputs(
@@ -423,6 +466,9 @@ __all__ = [
     "ImageInput",
     "PointCloudInput",
     "as_point",
+    "get_config",
+    "get_config_dir_path",
+    "get_root_dir_path",
     "existing_path",
     "fmt_point",
     "load_camera_info",
@@ -432,8 +478,12 @@ __all__ = [
     "line",
     "print_semantic_placement_result",
     "project_point_to_image",
+    "read_json",
+    "read_yaml",
     "resolve_empower_roots",
+    "save_json",
     "save_semantic_placement_outputs",
+    "save_yaml",
     "semantic_placement_geometries",
     "sphere",
     "stage_semantic_placement_inputs",

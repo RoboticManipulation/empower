@@ -21,7 +21,6 @@ to match your actual camera calibration (check 'rostopic echo /d400/...
 """
 
 import argparse
-import json
 import os
 import shutil
 import sys
@@ -29,6 +28,7 @@ import sys
 import cv2
 
 from paths import IMAGES_DIR, OUTPUT_DIR, ROOT_DIR
+from utils.common_utils import read_json, save_json
 
 DATA_ROOT = os.path.join(ROOT_DIR, "data_ur5e")
 
@@ -51,8 +51,7 @@ _FALLBACK_INTRINSICS = {
 def _load_intrinsics() -> dict:
     """Read fx/fy/cx/cy from camera_intrinsics.json (K matrix) or fall back."""
     if os.path.exists(_INTRINSICS_FILE):
-        with open(_INTRINSICS_FILE) as f:
-            raw = json.load(f)
+        raw = read_json(_INTRINSICS_FILE)
         K = raw["K"]  # row-major 3×3: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
         return {
             "fx": K[0],
@@ -97,8 +96,7 @@ def prepare(use_case: str, session: str, frame_idx: int) -> None:
     # Camera intrinsics JSON (consumed by color_pcl_local.py)
     intrinsics = _load_intrinsics()
     cam_dst = os.path.join(dump_dir, "camera_info.json")
-    with open(cam_dst, "w") as f:
-        json.dump(intrinsics, f, indent=2)
+    save_json(cam_dst, intrinsics)
     src_label = _INTRINSICS_FILE if os.path.exists(_INTRINSICS_FILE) else "fallback defaults"
     print(f"[OK] CAM  : intrinsics from '{src_label}'  →  {cam_dst}")
     print(f"           fx={intrinsics['fx']:.3f}  fy={intrinsics['fy']:.3f}  "

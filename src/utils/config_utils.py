@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+from utils.common_utils import get_config
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -16,8 +16,7 @@ _SEMANTIC_PLACEMENT_CONFIG: dict[str, Any] | None = None
 def load_semantic_placement_config() -> dict[str, Any]:
     global _SEMANTIC_PLACEMENT_CONFIG
     if _SEMANTIC_PLACEMENT_CONFIG is None:
-        with open(SEMANTIC_PLACEMENT_CONFIG_PATH) as f:
-            loaded = yaml.safe_load(f) or {}
+        loaded = get_config("semantic_placement") or {}
         if not isinstance(loaded, dict):
             raise ValueError(
                 "Semantic placement config must be a mapping: "
