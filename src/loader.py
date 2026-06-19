@@ -1,5 +1,6 @@
 import os
 import time
+from importlib import import_module
 import spacy
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -34,7 +35,7 @@ class Loader:
         os.makedirs(self._DUMP_DIR, exist_ok=True)
         self._MASKED_SCANS_DIR = self
 
-        self._sam3_model = None
+        self._segmentation = None
         self._yolow_model = None
         self._vit_sam_model = None
 
@@ -74,16 +75,20 @@ class Loader:
         self._vit_sam_model = value
 
     @property
-    def sam3_model(self):
-        if self._sam3_model is None:
-            from models import SAM3Detector
+    def segmentation(self):
+        if self._segmentation is None:
+            print(
+                "No Segmentation instance passed to Empower,"
+                "this may result in multiple SAM3 instances and unnecessary memory usage."
+            )
+            segmentation_module = import_module("geo_sem_place.segmentation.segmentation")
+            device = os.environ.get("EMPOWER_SAM3_DEVICE")
+            self._segmentation = segmentation_module.Segmentation(device=device)
+        return self._segmentation
 
-            self._sam3_model = SAM3Detector()
-        return self._sam3_model
-    
-    @sam3_model.setter
-    def sam3_model(self, value):
-        self._sam3_model = value
+    @segmentation.setter
+    def segmentation(self, value):
+        self._segmentation = value
         
     @property
     def CONFIG(self):

@@ -361,7 +361,7 @@ class Detection:
         union = np.logical_or(mask_a, mask_b).sum()
         return 0.0 if union == 0 else intersection / union
 
-    def sam3_detections(self, sam3_results, prompt_to_canonical):
+    def segmentation_detections(self, sam3_results, prompt_to_canonical, prompt_labels):
         candidates = []
         default_max_per_object = (
             "3"
@@ -377,7 +377,7 @@ class Detection:
         masks = sam3_results["masks"]
 
         for bbox, score, class_id, mask in zip(boxes, scores, class_ids, masks):
-            prompt_label = self.loader_instance.sam3_model.get_class_name(class_id)
+            prompt_label = prompt_labels[int(class_id)] if 0 <= int(class_id) < len(prompt_labels) else None
             if not prompt_label:
                 continue
             label = prompt_to_canonical.get(
@@ -470,14 +470,48 @@ class Detection:
         backend = self.detector_backend()
         if backend == "sam3":
             score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.3"))
-            self.loader_instance.sam3_model.set_class_name(prompt_labels)
-            sam3_results = self.loader_instance.sam3_model.detect(
+            segmentation = self.loader_instance.segmentation
+            segmentation.processor.confidence_threshold = score_thr
+            raw_results = segmentation.segment_img(
                 image_path,
-                max_num_boxes=100,
-                score_thr=score_thr,
-                nms_thr=0.5,
+                prompt_labels,
+                remove_similar=False,
             )
-            detections = self.sam3_detections(sam3_results, prompt_to_canonical)
+
+            boxes, scores, class_ids, masks = [], [], [], []
+            for class_id, prompt in enumerate(prompt_labels):
+                result = raw_results.get(prompt)
+                if result is None:
+                    continue
+
+                prompt_boxes = result["boxes"].detach().float().cpu().numpy()
+                prompt_scores = result["scores"].detach().float().cpu().numpy()
+                prompt_masks = result["masks"].detach().cpu().numpy()
+
+                for box, score, mask in zip(prompt_boxes, prompt_scores, prompt_masks):
+                    if float(score) < score_thr:
+                        continue
+                    boxes.append(box.astype(np.float32))
+                    scores.append(np.float32(score))
+                    class_ids.append(np.int64(class_id))
+                    masks.append(np.squeeze(mask).astype(bool))
+
+            if boxes:
+                sam3_results = {
+                    "boxes": np.stack(boxes).astype(np.float32),
+                    "scores": np.asarray(scores, dtype=np.float32),
+                    "class_ids": np.asarray(class_ids, dtype=np.int64),
+                    "masks": np.stack(masks).astype(bool),
+                }
+            else:
+                sam3_results = {
+                    "boxes": np.empty((0, 4), dtype=np.float32),
+                    "scores": np.empty((0,), dtype=np.float32),
+                    "class_ids": np.empty((0,), dtype=np.int64),
+                    "masks": np.empty((0, image.shape[0], image.shape[1]), dtype=bool),
+                }
+
+            detections = self.segmentation_detections(sam3_results, prompt_to_canonical, prompt_labels)
             print(
                 f"[DEBUG] SAM3 raw detections: {len(sam3_results['scores'])} masks, "
                 f"kept after canonical dedupe: {len(detections)}"

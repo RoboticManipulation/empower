@@ -146,10 +146,11 @@ else:
             ) from exc
         print(f"[OK] SAM3 {filename}: {path}")
 
-from models import SAM3Detector
+from geo_sem_place.segmentation.segmentation import Segmentation
 
-detector = SAM3Detector(checkpoint_path=checkpoint)
-print(f"[OK] SAM3 detector initialized on {detector.device}")
+device = os.environ.get("EMPOWER_SAM3_DEVICE")
+segmentation = Segmentation(device=device)
+print(f"[OK] SAM3 segmentation initialized on {device or ('cuda' if __import__('torch').cuda.is_available() else 'cpu')}")
 PY
 }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from importlib import import_module
 from pathlib import Path
 
 import numpy as np
@@ -16,8 +17,17 @@ from semantic_placement_config import SUPPORTED_DETECTOR_BACKENDS
 from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
+def _create_segmentation():
+    segmentation_module = import_module("geo_sem_place.segmentation.segmentation")
+    return segmentation_module.Segmentation()
+
+
 def main() -> None:
     args = _parse_args()
+
+    segmentation = None
+    if args.detector_backend == "sam3":
+        segmentation = _create_segmentation()
 
     wrapper = EmpowerSemanticPlacementWrapper(
         frame_id=args.frame_id,
@@ -27,6 +37,7 @@ def main() -> None:
         use_case=args.semantic_mode,
         images_root=args.images_root,
         output_root=args.output_root,
+        segmentation=segmentation,
     )
     result = wrapper.run(
         grasp_object=args.grasp_object,

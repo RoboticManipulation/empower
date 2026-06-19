@@ -28,6 +28,7 @@ class EmpowerSemanticPlacementWrapper:
         images_root: str | os.PathLike[str] | None = None,
         output_root: str | os.PathLike[str] | None = None,
         preload_models: bool = True,
+        segmentation: Any | None = None,
     ) -> None:
         _ensure_src_on_path()
 
@@ -48,6 +49,8 @@ class EmpowerSemanticPlacementWrapper:
         from detection import Detection
 
         self.loader_instance = loader.Loader(self.use_case)
+        if segmentation is not None:
+            self.loader_instance.segmentation = segmentation
         self.detection_instance = Detection()
         if preload_models:
             self.load_models()
@@ -56,13 +59,14 @@ class EmpowerSemanticPlacementWrapper:
         """Load the selected detector backend once for reuse across runs."""
 
         if self.detector_backend == "sam3":
-            _ = self.loader_instance.sam3_model
+            _ = self.loader_instance.segmentation
             return
 
-        from models import YOLOW
+        if self.detector_backend == "yolo_world":
+            from models import YOLOW
 
-        if self.loader_instance.yolow_model is None:
-            self.loader_instance.yolow_model = YOLOW(self.loader_instance.YOLOW_PATH)
+            if self.loader_instance.yolow_model is None:
+                self.loader_instance.yolow_model = YOLOW(self.loader_instance.YOLOW_PATH)
 
     def run(
         self,
