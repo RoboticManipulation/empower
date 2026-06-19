@@ -6,8 +6,8 @@ import json
 import os
 from typing import Any, Mapping
 
-from semantic_placement_config import DEFAULT_MODE
-from semantic_placement_config import REFINED_MODE
+from utils.config_utils import DEFAULT_MODE
+from utils.config_utils import REFINED_MODE
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 from semantic_placement_reference_geometry import get_semantic_reference_geometry

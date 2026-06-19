@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from empower.semantic_placement_config import DEFAULT_RELATION_OFFSET_M
+from empower.utils.config_utils import DEFAULT_RELATION_OFFSET_M
 from empower.semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 
 

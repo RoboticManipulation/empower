@@ -33,10 +33,10 @@ Therefore, the GPT prompts in the ```src/agents.py``` file and the low-level gro
 
 ## Model checkpoints
 ### YOLO-World
-To download the YOLO-World model, visit the official [repository](https://huggingface.co/spaces/stevengrove/YOLO-World), download the .pth weights and put them in the ```config/yolow/``` directory.
+To download the YOLO-World model, visit the official [repository](https://huggingface.co/spaces/stevengrove/YOLO-World), download the .pth weights and put them in the ```configs/yolow/``` directory.
 ### EfficientViT-SAM
 To download the pre-trained weights and the encoder and decoder ONNX models follow the instruction on the official [repository](https://github.com/mit-han-lab/efficientvit).
-After the download, put the models and weights in the ```config/efficientvitsam/``` directory.
+After the download, put the models and weights in the ```configs/efficientvitsam/``` directory.
 For our tests, we used the ```l2``` model.
 
 ### REPLACING YOLO-World with SAM3

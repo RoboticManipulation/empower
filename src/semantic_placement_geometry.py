@@ -9,9 +9,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from semantic_placement_config import DEFAULT_EMPOWER_RELATION_OFFSET_M
-from semantic_placement_config import DEFAULT_FRAME_ID
-from semantic_placement_config import DEFAULT_RELATION_OFFSET_M
+from utils.config_utils import DEFAULT_FRAME_ID
+from utils.config_utils import DEFAULT_RELATION_OFFSET_M
 
 def get_semantic_placement_coordinates_from_plan(
     planning_text: str,
@@ -117,7 +116,7 @@ def get_empower_style_semantic_coordinates(
     grasp_object: str,
     reference_positions: Mapping[str, np.ndarray],
     frame_id: str,
-    relation_offset_m: float = DEFAULT_EMPOWER_RELATION_OFFSET_M,
+    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
 ) -> dict[str, Any]:
     result = get_semantic_placement_coordinates(
         grasp_object,
@@ -306,7 +305,7 @@ def apply_relation_offset(
     reference_position: np.ndarray,
     *,
     relation: str | None,
-    relation_offset_m: float = DEFAULT_EMPOWER_RELATION_OFFSET_M,
+    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
 ) -> np.ndarray:
     coordinate = np.asarray(reference_position, dtype=float).copy()
     offset = abs(float(relation_offset_m))

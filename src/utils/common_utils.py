@@ -12,7 +12,7 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 
-from semantic_placement_config import DEFAULT_FRAME_ID
+from utils.config_utils import DEFAULT_FRAME_ID
 
 
 ImageInput = str | os.PathLike[str] | np.ndarray | Image.Image

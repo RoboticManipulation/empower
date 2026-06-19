@@ -7,10 +7,11 @@ import argparse
 from importlib import import_module
 from pathlib import Path
 
-from semantic_placement_config import DEFAULT_FRAME_ID
-from semantic_placement_config import DEFAULT_MODE
-from semantic_placement_config import SUPPORTED_DETECTOR_BACKENDS
-from semantic_placement_config import SUPPORTED_SEMANTIC_PLACEMENT_MODES
+from utils.config_utils import DEFAULT_FRAME_ID
+from utils.config_utils import DEFAULT_MODE
+from utils.config_utils import DEFAULT_RELATION_OFFSET_M
+from utils.config_utils import SUPPORTED_DETECTOR_BACKENDS
+from utils.config_utils import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
@@ -94,8 +95,11 @@ def _parse_args() -> argparse.Namespace:
         "--relation-offset-m",
         "--offset-m",
         type=float,
-        required=True,
-        help="Left/right placement offset in meters.",
+        default=DEFAULT_RELATION_OFFSET_M,
+        help=(
+            "Left/right placement offset in meters. Defaults to the configured "
+            "mode-specific relation offset."
+        ),
     )
     parser.add_argument(
         "--images-root",

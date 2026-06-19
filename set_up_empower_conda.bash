@@ -72,19 +72,19 @@ _download_model_weights() {
 
   _download_if_missing \
     "https://huggingface.co/wondervictor/YOLO-World-V2.1/resolve/main/l_stage1-7d280586.pth" \
-    "${ROOT}/config/yolow/yolow.pth"
+    "${ROOT}/configs/yolow/yolow.pth"
 
   _download_if_missing \
     "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l2_encoder.onnx" \
-    "${ROOT}/config/efficientvitsam/l2_encoder.onnx"
+    "${ROOT}/configs/efficientvitsam/l2_encoder.onnx"
 
   _download_if_missing \
     "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/onnx/l2_decoder.onnx" \
-    "${ROOT}/config/efficientvitsam/l2_decoder.onnx"
+    "${ROOT}/configs/efficientvitsam/l2_decoder.onnx"
 
   _download_if_missing \
     "https://huggingface.co/mit-han-lab/efficientvit-sam/resolve/main/efficientvit_sam_l2.pt" \
-    "${ROOT}/config/efficientvitsam/efficientvit_sam_l2.pt"
+    "${ROOT}/configs/efficientvitsam/efficientvit_sam_l2.pt"
 }
 
 _source_conda

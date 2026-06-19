@@ -8,8 +8,8 @@ import math
 import os
 import re
 from agents_langchain import Agents
-from semantic_placement_config import REFINED_MODE
-from semantic_placement_config import SUPPORTED_SEMANTIC_PLACEMENT_MODES
+from utils.config_utils import REFINED_MODE
+from utils.config_utils import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_grounding import get_semantic_grasp_object
 from semantic_placement_grounding import run_grounded_semantic_placement
 from semantic_placement_prompts import semantic_placement_empower_task_description

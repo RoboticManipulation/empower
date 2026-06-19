@@ -165,23 +165,23 @@ cython_debug/
 
 # ros_docker setup
 
-config/efficientvitsam/efficientvit_sam_l2.pt
-config/efficientvitsam/l2_decoder.onnx
-config/efficientvitsam/l2_encoder.onnx
-config/yolow/20260216_125034/
-config/yolow/20260216_130205/
-config/yolow/20260216_131243/
-config/yolow/20260216_131319/
-config/yolow/20260216_131623/
-config/yolow/20260216_133138/
-config/yolow/20260216_133455/
-config/yolow/20260216_133752/
-config/yolow/yolow.pth
-config/yolow/yolow1.pth
+configs/efficientvitsam/efficientvit_sam_l2.pt
+configs/efficientvitsam/l2_decoder.onnx
+configs/efficientvitsam/l2_encoder.onnx
+configs/yolow/20260216_125034/
+configs/yolow/20260216_130205/
+configs/yolow/20260216_131243/
+configs/yolow/20260216_131319/
+configs/yolow/20260216_131623/
+configs/yolow/20260216_133138/
+configs/yolow/20260216_133455/
+configs/yolow/20260216_133752/
+configs/yolow/yolow.pth
+configs/yolow/yolow1.pth
 devel/
 images/
 logs/
 output/
 rosbags/
-config/yolow/*
+configs/yolow/*
 configs/llm_config.yaml

@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from semantic_placement_config import DEFAULT_FRAME_ID
+from utils.config_utils import DEFAULT_FRAME_ID
 from utils.common_utils import CameraInfoInput
 from utils.common_utils import ImageInput
 from utils.common_utils import PointCloudInput

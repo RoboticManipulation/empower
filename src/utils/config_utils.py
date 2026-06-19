@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 SEMANTIC_PLACEMENT_CONFIG_PATH = ROOT_DIR / "configs" / "semantic_placement.yaml"
 _SEMANTIC_PLACEMENT_CONFIG: dict[str, Any] | None = None
 
@@ -39,15 +39,11 @@ REFINED_MODE = str(required_config_value("refined_mode"))
 DEFAULT_MODE = str(required_config_value("default_mode"))
 DEFAULT_FRAME_ID = str(required_config_value("default_frame_id"))
 DEFAULT_RELATION_OFFSET_M = float(required_config_value("default_relation_offset_m"))
-DEFAULT_EMPOWER_RELATION_OFFSET_M = float(
-    required_config_value("default_empower_relation_offset_m")
-)
 SUPPORTED_DETECTOR_BACKENDS = tuple(
     str(backend) for backend in required_config_value("supported_detector_backends")
 )
 SUPPORTED_SEMANTIC_PLACEMENT_MODES = (ORIGINAL_MODE, REFINED_MODE)
 __all__ = [
-    "DEFAULT_EMPOWER_RELATION_OFFSET_M",
     "DEFAULT_FRAME_ID",
     "DEFAULT_MODE",
     "DEFAULT_RELATION_OFFSET_M",
