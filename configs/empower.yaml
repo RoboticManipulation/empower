@@ -1,4 +1,10 @@
+default_mode: "refined"
 frame_id: "gemini336_color_optical_frame"
+
+visualization:
+  voxel_size: 0.01
+  marker_radius: 0.03
+  show_window: true
 
 mode:
   original:

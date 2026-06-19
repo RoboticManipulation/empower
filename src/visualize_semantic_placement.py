@@ -4,50 +4,28 @@
 from __future__ import annotations
 
 import argparse
-from importlib import import_module
 from pathlib import Path
 
-from utils.config_utils import DEFAULT_FRAME_ID
-from utils.config_utils import DEFAULT_MODE
-from utils.config_utils import DEFAULT_RELATION_OFFSET_M
-from utils.config_utils import SUPPORTED_DETECTOR_BACKENDS
-from utils.config_utils import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
-
-
-def _create_segmentation():
-    segmentation_module = import_module("geo_sem_place.segmentation.segmentation")
-    return segmentation_module.Segmentation()
+from geo_sem_place.segmentation.segmentation import Segmentation
 
 
 def main() -> None:
     args = _parse_args()
-
-    segmentation = None
-    if args.detector_backend == "sam3":
-        segmentation = _create_segmentation()
-
-    wrapper = EmpowerSemanticPlacementWrapper(
-        detector_backend=args.detector_backend,
-        mode=args.mode,
-        relation_offset_m=args.relation_offset_m,
-        segmentation=segmentation,
-    )
+    segmentation = Segmentation()
+    wrapper = EmpowerSemanticPlacementWrapper(mode=args.mode, segmentation=segmentation)
     wrapper.set_inputs(
         grasp_object=args.grasp_object,
         image=args.image,
         pointcloud=args.pointcloud,
         camera_info=args.camera_info,
-        frame_id=args.frame_id,
         images_root=args.images_root,
         output_root=args.output_root,
     )
     wrapper.run()
     wrapper.save_outputs(
         write_prefix=args.write_prefix,
-        voxel_size=args.voxel_size,
-        marker_radius=args.marker_radius,
-        show_window=not args.no_window,
+        show_window=False if args.no_window else None,
     )
 
 
@@ -71,35 +49,9 @@ def _parse_args() -> argparse.Namespace:
         help="Optional camera_info.json for image/point-cloud grounding",
     )
     parser.add_argument(
-        "--frame-id",
-        default=DEFAULT_FRAME_ID,
-        help="Frame label for the returned coordinate",
-    )
-    parser.add_argument(
-        "--detector-backend",
-        "--detector",
-        choices=SUPPORTED_DETECTOR_BACKENDS,
-        required=True,
-        help="Prompt-conditioned detector backend to use for grounding",
-    )
-    parser.add_argument(
         "--mode",
-        choices=SUPPORTED_SEMANTIC_PLACEMENT_MODES,
-        default=DEFAULT_MODE,
-        help=(
-            "refined uses the refined single-reference logic; original uses "
-            "the original Empower-style plan and centroid offsets"
-        ),
-    )
-    parser.add_argument(
-        "--relation-offset-m",
-        "--offset-m",
-        type=float,
-        default=DEFAULT_RELATION_OFFSET_M,
-        help=(
-            "Left/right placement offset in meters. Defaults to the configured "
-            "mode-specific relation offset."
-        ),
+        choices=("original", "refined"),
+        help="Semantic placement mode alias. Omit to use configs/empower.yaml default_mode.",
     )
     parser.add_argument(
         "--images-root",
@@ -110,18 +62,6 @@ def _parse_args() -> argparse.Namespace:
         "--output-root",
         type=Path,
         help="Optional Empower output root for staging",
-    )
-    parser.add_argument(
-        "--voxel-size",
-        type=float,
-        default=0.01,
-        help="Downsample voxel size in meters; use 0 to disable",
-    )
-    parser.add_argument(
-        "--marker-radius",
-        type=float,
-        default=0.03,
-        help="Marker sphere radius in meters",
     )
     parser.add_argument(
         "--write-prefix",

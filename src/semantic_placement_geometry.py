@@ -9,8 +9,6 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from utils.config_utils import DEFAULT_FRAME_ID
-from utils.config_utils import DEFAULT_RELATION_OFFSET_M
 
 def get_semantic_placement_coordinates_from_plan(
     planning_text: str,
@@ -19,9 +17,9 @@ def get_semantic_placement_coordinates_from_plan(
     grasp_object: str | None = None,
     placement_surface_height_m: float | None = None,
     reference_positions_by_name: Mapping[str, Sequence[float]] | None = None,
-    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
+    relation_offset_m: float,
     orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
-    frame_id: str = DEFAULT_FRAME_ID,
+    frame_id: str,
 ) -> dict[str, Any]:
     """Convert a semantic placement action plan into camera-frame coordinates."""
 
@@ -67,7 +65,7 @@ def get_semantic_placement_coordinates(
     placement_pointclouds: np.ndarray | Sequence[np.ndarray],
     placement_surface_height_m: float | None = None,
     orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
-    frame_id: str = DEFAULT_FRAME_ID,
+    frame_id: str,
 ) -> dict[str, Any]:
     """Return a fallback surface placement coordinate from point-cloud data."""
 
@@ -116,7 +114,7 @@ def get_empower_style_semantic_coordinates(
     grasp_object: str,
     reference_positions: Mapping[str, np.ndarray],
     frame_id: str,
-    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
+    relation_offset_m: float,
 ) -> dict[str, Any]:
     result = get_semantic_placement_coordinates(
         grasp_object,
@@ -305,7 +303,7 @@ def apply_relation_offset(
     reference_position: np.ndarray,
     *,
     relation: str | None,
-    relation_offset_m: float = DEFAULT_RELATION_OFFSET_M,
+    relation_offset_m: float,
 ) -> np.ndarray:
     coordinate = np.asarray(reference_position, dtype=float).copy()
     offset = abs(float(relation_offset_m))
@@ -445,6 +443,7 @@ def _apply_reference_relation(
         reference_position=reference_position,
         direction=direction,
         preferred_offset_m=offset,
+        surface_height=float(result["coordinates"][2]),
     )
     coordinates = [float(surface[0]), float(surface[1]), float(surface[2])]
     updated["coordinates"] = coordinates
@@ -467,12 +466,13 @@ def _candidate_surface_point(
     reference_position: np.ndarray,
     direction: float,
     preferred_offset_m: float,
+    surface_height: float,
 ) -> np.ndarray:
     return np.array(
         [
             float(reference_position[0] + direction * preferred_offset_m),
             float(reference_position[1]),
-            float(reference_position[2]),
+            float(surface_height),
         ],
         dtype=float,
     )

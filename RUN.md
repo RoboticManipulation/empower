@@ -1,5 +1,16 @@
-## Semantic placement via Empower 
+## Semantic placement via Empower
 
+Defaults for semantic placement live in `configs/empower.yaml`:
+
+- `default_mode`: used when `--mode` is omitted
+- `frame_id`: coordinate frame label for results
+- `visualization.voxel_size`, `visualization.marker_radius`, `visualization.show_window`
+- `mode.<name>.detector_backend`: `sam3` or `yolow`
+- `mode.<name>.relation_offset_m`: left/right placement offset in meters
+
+CLI aliases map to the YAML mode keys: `--mode original` uses the first key under `mode:`, and `--mode refined` uses the second.
+
+To switch detector or offset for a run, edit the matching block in `configs/empower.yaml` before launching `visualize_semantic_placement.py`.
 
 ### Refined semantic placement
 
@@ -9,20 +20,22 @@ camera-frame coordinate using the reference centroid plus the refined offset.
 
 #### Refined with SAM3
 
+Set `mode.refined.detector_backend: "sam3"` in `configs/empower.yaml`, then run:
+
 ```bash
 python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend sam3 \
   --mode refined \
-  --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb0_refined_sam3
 ```
 
 #### Refined with YOLO-World
+
+Set `mode.refined.detector_backend: "yolow"` in `configs/empower.yaml`, then run:
 
 ```bash
 python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
@@ -30,9 +43,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend yolow \
   --mode refined \
-  --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_refined_yolow
 ```
@@ -46,20 +57,22 @@ coordinate instead of sending it to MoveIt.
 
 #### Baseline with SAM3
 
+Set `mode.original.detector_backend: "sam3"` in `configs/empower.yaml`, then run:
+
 ```bash
 python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/rgb_0.png \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend sam3 \
   --mode original \
-  --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
 ```
 
 #### Baseline with YOLO-World
+
+Set `mode.original.detector_backend: "yolow"` in `configs/empower.yaml`, then run:
 
 ```bash
 python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
@@ -67,9 +80,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
-  --detector-backend yolow \
   --mode original \
-  --relation-offset-m 0.15 \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_yolow
 ```
@@ -88,7 +99,7 @@ For the two detector setups:
  Current formula:
 
   reference = centroid(reference object pointcloud)
-  offset = value passed by --relation-offset-m
+  offset = mode.<name>.relation_offset_m from configs/empower.yaml
       
 
   left:

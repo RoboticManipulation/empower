@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import types
@@ -34,6 +35,11 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
     class FakeLoader:
         def __init__(self, task_name: str) -> None:
             self.task_name = task_name
+            self._segmentation = object()
+
+        @property
+        def segmentation(self):
+            return self._segmentation
 
     class FakeDetection:
         def set_loader(self, loader_instance: FakeLoader) -> None:
@@ -48,7 +54,7 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
                     "scan_exists": (scan_dir / "scan.jpg").exists(),
                     "pointcloud_exists": (dump_dir / "depth_pointcloud.pcd").exists(),
                     "camera_exists": (dump_dir / "camera_info.json").exists(),
-                    "camera_text": (dump_dir / "camera_info.json").read_text(),
+                    "camera_info": json.loads((dump_dir / "camera_info.json").read_text()),
                     "grasp_file_text": (
                         dump_dir / "grasp_object.txt"
                     ).read_text(),
@@ -66,12 +72,7 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
         types.SimpleNamespace(Detection=FakeDetection),
     )
 
-    wrapper = EmpowerSemanticPlacementWrapper(
-        detector_backend="sam3",
-        mode="original",
-        relation_offset_m=0.15,
-        preload_models=False,
-    )
+    wrapper = EmpowerSemanticPlacementWrapper(mode="original")
     wrapper.set_inputs(
         grasp_object="milk carton",
         image=image_path,
@@ -92,6 +93,6 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
         "scan_exists": True,
         "pointcloud_exists": True,
         "camera_exists": True,
-        "camera_text": '{"fx": 1, "fy": 1, "cx": 0, "cy": 0}',
+        "camera_info": {"fx": 1, "fy": 1, "cx": 0, "cy": 0},
         "grasp_file_text": "milk carton",
     }

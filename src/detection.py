@@ -8,8 +8,6 @@ import math
 import os
 import re
 from agents_langchain import Agents
-from utils.config_utils import REFINED_MODE
-from utils.config_utils import SUPPORTED_SEMANTIC_PLACEMENT_MODES
 from semantic_placement_grounding import get_semantic_grasp_object
 from semantic_placement_grounding import run_grounded_semantic_placement
 from semantic_placement_prompts import semantic_placement_empower_task_description
@@ -50,7 +48,7 @@ class Detection:
         task_description = self.task_dict[task_name]
         if task_name == "semantic_placement":
             grasp_object = get_semantic_grasp_object(self.loader_instance, required=True)
-            if self._semantic_mode() == REFINED_MODE:
+            if self._semantic_refined_mode() is not None and self._semantic_mode() == self._semantic_refined_mode():
                 task_description = semantic_placement_refined_task_description(grasp_object)
             else:
                 task_description = semantic_placement_empower_task_description(
@@ -79,11 +77,22 @@ class Detection:
         self.loader_instance = loader_instance
         self.run_experiment()
         self.run_image(image_path=self.loader_instance.SCAN_DIR+"scan.jpg")
-        if self._semantic_mode() in SUPPORTED_SEMANTIC_PLACEMENT_MODES:
+        if self._semantic_mode() in self._semantic_placement_modes():
             self.run_semantic_placement()
 
     def _semantic_mode(self):
         return getattr(self.loader_instance, "mode", None)
+
+    def _semantic_placement_modes(self):
+        return tuple(getattr(self.loader_instance, "semantic_placement_modes", ()))
+
+    def _semantic_refined_mode(self):
+        modes = self._semantic_placement_modes()
+        return getattr(
+            self.loader_instance,
+            "semantic_refined_mode",
+            modes[min(1, len(modes) - 1)] if modes else None,
+        )
         
     def split_word(self,words):
         splitted_word = []
@@ -249,7 +258,7 @@ class Detection:
         prompt_to_canonical = {}
         scene_objects = self.extract_scene_objects(object_relations)
         object_descriptions = self.extract_object_descriptions(planning_text)
-        if self._semantic_mode() == REFINED_MODE:
+        if self._semantic_refined_mode() is not None and self._semantic_mode() == self._semantic_refined_mode():
             grasp_object = get_semantic_grasp_object(
                 self.loader_instance,
                 required=False,
@@ -358,7 +367,7 @@ class Detection:
         candidates = []
         default_max_per_object = (
             "3"
-            if self._semantic_mode() in SUPPORTED_SEMANTIC_PLACEMENT_MODES
+            if self._semantic_mode() in self._semantic_placement_modes()
             else "1"
         )
         max_per_object = int(

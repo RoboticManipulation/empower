@@ -6,8 +6,6 @@ import os
 from typing import Any, Mapping
 
 from utils.common_utils import save_json
-from utils.config_utils import DEFAULT_MODE
-from utils.config_utils import REFINED_MODE
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 from semantic_placement_reference_geometry import get_semantic_reference_geometry
@@ -42,7 +40,7 @@ def run_grounded_semantic_placement(
     mode = semantic_placement_mode(loader_instance)
     relation_offset_m = semantic_relation_offset_m(loader_instance)
 
-    if mode == REFINED_MODE:
+    if mode == semantic_refined_mode(loader_instance):
         result = get_semantic_placement_coordinates_from_plan(
             planning_text,
             placement_pointclouds=placement_pointcloud,
@@ -76,11 +74,27 @@ def run_grounded_semantic_placement(
 
 
 def semantic_placement_mode(loader_instance: Any) -> str:
-    return getattr(loader_instance, "mode", None) or DEFAULT_MODE
+    mode = getattr(loader_instance, "mode", None) or getattr(
+        loader_instance,
+        "semantic_default_mode",
+        None,
+    )
+    if not mode:
+        raise ValueError("semantic placement mode is not configured on the loader")
+    return str(mode)
+
+
+def semantic_refined_mode(loader_instance: Any) -> str | None:
+    modes = tuple(getattr(loader_instance, "semantic_placement_modes", ()))
+    return getattr(
+        loader_instance,
+        "semantic_refined_mode",
+        modes[min(1, len(modes) - 1)] if modes else None,
+    )
 
 
 def semantic_relation_offset_m(loader_instance: Any) -> float:
-    return loader_instance.semantic_relation_offset_m
+    return float(loader_instance.semantic_relation_offset_m)
 
 
 def get_semantic_grasp_object(loader_instance: Any, required: bool = False) -> str | None:
@@ -112,13 +126,12 @@ def get_semantic_grasp_object(loader_instance: Any, required: bool = False) -> s
 
 
 def semantic_frame_id(loader_instance: Any) -> str:
-    return (
-        getattr(loader_instance, "semantic_frame_id", None)
-        or os.environ.get(
-            "EMPOWER_SEMANTIC_FRAME_ID",
-            "gemini336_color_optical_frame",
-        )
+    frame_id = getattr(loader_instance, "semantic_frame_id", None) or os.environ.get(
+        "EMPOWER_SEMANTIC_FRAME_ID",
     )
+    if not frame_id:
+        raise ValueError("semantic placement frame_id is not configured on the loader")
+    return str(frame_id)
 
 
 __all__ = [
@@ -126,5 +139,6 @@ __all__ = [
     "run_grounded_semantic_placement",
     "semantic_frame_id",
     "semantic_placement_mode",
+    "semantic_refined_mode",
     "semantic_relation_offset_m",
 ]

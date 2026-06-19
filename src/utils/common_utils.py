@@ -56,13 +56,11 @@ def get_config_dir_path():
     config_dir = current_dir / "configs"
     return config_dir
 
-def get_config(config_name: str) -> str:
+def get_config(config_name: str) -> Any:
     config_dir_path = get_config_dir_path()
     config_file = config_name + ".yaml"
     config = read_yaml(config_dir_path / config_file)
     return config
-
-DEFAULT_FRAME_ID = str(get_config("semantic_placement")["default_frame_id"])
 
 
 def existing_path(path: str | os.PathLike[str], name: str) -> Path:
@@ -411,7 +409,7 @@ def print_semantic_placement_result(
     result: Mapping[str, Any],
     *,
     grasp_object: str,
-    frame_id: str = DEFAULT_FRAME_ID,
+    frame_id: str,
 ) -> None:
     coordinate = as_point(result["coordinates"])
     print(f"[OK] grasp object: {result.get('grasp_object', grasp_object)}")
@@ -462,7 +460,6 @@ def save_semantic_placement_outputs(
 
 __all__ = [
     "CameraInfoInput",
-    "DEFAULT_FRAME_ID",
     "ImageInput",
     "PointCloudInput",
     "as_point",
