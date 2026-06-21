@@ -230,6 +230,8 @@ class EmpowerSemanticPlacementWrapper:
                 self.default_marker_radius if marker_radius is None else float(marker_radius)
             ),
             show_window=self.default_show_window if show_window is None else bool(show_window),
+            camera_extrinsics=self.camera_extrinsics,
+            pointcloud_origin=self.pointcloud_origin,
         )
 
     def _ensure_inputs_ready(self) -> None:

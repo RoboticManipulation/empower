@@ -491,6 +491,52 @@ def project_point_to_image(
     return None
 
 
+def transform_point(point: np.ndarray, transform: np.ndarray) -> np.ndarray:
+    return point @ transform[:3, :3].T + transform[:3, 3]
+
+
+def extrinsics_to_matrix(camera_extrinsics: Mapping[str, Any]) -> np.ndarray | None:
+    if "matrix" not in camera_extrinsics:
+        return None
+    matrix = np.asarray(camera_extrinsics["matrix"], dtype=float)
+    if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+        return None
+    return matrix
+
+
+def world_to_camera_transform(camera_extrinsics: Mapping[str, Any] | None) -> np.ndarray | None:
+    if camera_extrinsics is None:
+        return None
+
+    matrix = extrinsics_to_matrix(camera_extrinsics)
+    if matrix is None:
+        return None
+
+    parent_frame = str(camera_extrinsics.get("parent_frame", "")).lower()
+    child_frame = str(camera_extrinsics.get("child_frame", "")).lower()
+    if "camera" in parent_frame or "optical" in parent_frame:
+        return matrix
+    if "camera" in child_frame or "optical" in child_frame:
+        return np.linalg.inv(matrix)
+    return np.linalg.inv(matrix)
+
+
+def overlay_projection_point(
+    coordinate: np.ndarray,
+    *,
+    camera_extrinsics: Mapping[str, Any] | None,
+    pointcloud_origin: str,
+) -> np.ndarray:
+    origin = str(pointcloud_origin).strip().lower()
+    if origin != "world":
+        return coordinate
+
+    world_to_camera = world_to_camera_transform(camera_extrinsics)
+    if world_to_camera is None:
+        return coordinate
+    return transform_point(coordinate, world_to_camera)
+
+
 def write_image_overlay(
     prefix: str | os.PathLike[str],
     *,
@@ -498,13 +544,20 @@ def write_image_overlay(
     camera_info: Mapping[str, Any],
     coordinate: np.ndarray,
     label: str,
+    camera_extrinsics: Mapping[str, Any] | None = None,
+    pointcloud_origin: str = "camera",
 ) -> None:
     import cv2
 
     intrinsics = load_camera_intrinsics(camera_info)
     rgb_image = np.asarray(image.convert("RGB"))
     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-    pixel = project_point_to_image(coordinate, intrinsics, bgr_image.shape[:2])
+    projection_point = overlay_projection_point(
+        coordinate,
+        camera_extrinsics=camera_extrinsics,
+        pointcloud_origin=pointcloud_origin,
+    )
+    pixel = project_point_to_image(projection_point, intrinsics, bgr_image.shape[:2])
     if pixel is None:
         print(
             "[WARN] placement coordinate projects outside the image; "
@@ -574,6 +627,8 @@ def save_semantic_placement_outputs(
     marker_radius: float,
     show_window: bool,
     window_name: str = "Empower Semantic Placement",
+    camera_extrinsics: Mapping[str, Any] | None = None,
+    pointcloud_origin: str = "camera",
 ) -> list[o3d.geometry.Geometry]:
     pointcloud_obj = visualization_pointcloud(pointcloud, voxel_size)
     geometries = semantic_placement_geometries(
@@ -591,6 +646,8 @@ def save_semantic_placement_outputs(
                 camera_info=camera_info,
                 coordinate=as_point(result["coordinates"]),
                 label=label,
+                camera_extrinsics=camera_extrinsics,
+                pointcloud_origin=pointcloud_origin,
             )
         else:
             print("[WARN] camera_info not provided; skipping 2D image overlay")
@@ -616,6 +673,7 @@ __all__ = [
     "load_image",
     "load_pointcloud",
     "line",
+    "overlay_projection_point",
     "print_semantic_placement_result",
     "project_point_to_image",
     "read_json",
