@@ -221,7 +221,7 @@ class EmpowerSemanticPlacementWrapper:
         return save_semantic_placement_outputs(
             pointcloud=self.pointcloud,
             result=self.semantic_placement_result,
-            prefix=write_prefix,
+            prefix=self._resolve_write_prefix(write_prefix),
             image=self.image,
             camera_info=self.camera_info,
             label=self.semantic_placement_result.get("grasp_object", self.grasp_object or ""),
@@ -233,6 +233,20 @@ class EmpowerSemanticPlacementWrapper:
             camera_extrinsics=self.camera_extrinsics,
             pointcloud_origin=self.pointcloud_origin,
         )
+
+    def _resolve_write_prefix(
+        self,
+        write_prefix: str | os.PathLike[str] | None,
+    ) -> Path | None:
+        if write_prefix is None:
+            return None
+
+        prefix = Path(write_prefix)
+        if prefix.is_absolute():
+            return prefix
+        if self.dump_dir is not None:
+            return self.dump_dir / prefix
+        return prefix
 
     def _ensure_inputs_ready(self) -> None:
         if self.grasp_object is None:
