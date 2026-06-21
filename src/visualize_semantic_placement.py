@@ -13,14 +13,14 @@ from geo_sem_place.segmentation.segmentation import Segmentation
 def main() -> None:
     args = _parse_args()
     segmentation = Segmentation()
-    wrapper = EmpowerSemanticPlacementWrapper(mode=args.mode, segmentation=segmentation)
+    ai = "mistral"
+    wrapper = EmpowerSemanticPlacementWrapper(mode=args.mode, segmentation=segmentation, output_root=args.output_root, ai=ai)
     wrapper.set_inputs(
         grasp_object=args.grasp_object,
         image=args.image,
         pointcloud=args.pointcloud,
         camera_info=args.camera_info,
-        images_root=args.images_root,
-        output_root=args.output_root,
+        images_root=args.images_root
     )
     wrapper.run()
     wrapper.save_outputs(

@@ -443,7 +443,6 @@ def _apply_reference_relation(
         reference_position=reference_position,
         direction=direction,
         preferred_offset_m=offset,
-        surface_height=float(result["coordinates"][2]),
     )
     coordinates = [float(surface[0]), float(surface[1]), float(surface[2])]
     updated["coordinates"] = coordinates
@@ -466,13 +465,12 @@ def _candidate_surface_point(
     reference_position: np.ndarray,
     direction: float,
     preferred_offset_m: float,
-    surface_height: float,
 ) -> np.ndarray:
     return np.array(
         [
             float(reference_position[0] + direction * preferred_offset_m),
             float(reference_position[1]),
-            float(surface_height),
+            float(reference_position[2]),
         ],
         dtype=float,
     )

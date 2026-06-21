@@ -26,11 +26,24 @@ def _resolve_api_key(env_var: str) -> str:
     return api_key
 
 
+def _canonical_provider(provider: str) -> str:
+    normalized = str(provider).strip().lower()
+    if normalized in {"chatgpt", "openai", "gpt"}:
+        return "chatgpt"
+    if normalized == "mistral":
+        return "mistral"
+    if normalized in {"openrouter", "open_router"}:
+        return "openrouter"
+    raise ValueError(
+        f"Unsupported provider: '{provider}'. Use 'chatgpt', 'mistral', or 'openrouter'."
+    )
+
+
 def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     """Instantiate a LangChain chat model for *provider*.
 
     Args:
-        provider:   "openai", "mixtral", or "openrouter"
+        provider:   "chatgpt", "mistral", or "openrouter"
         llm_cfg:    contents of configs/llm/<provider>.yaml
         vision:     True  → use the vision-capable model variant
                     False → use the text-only planning model variant
@@ -38,7 +51,7 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     model_key = "vision_model" if vision else "model"
     model_name = llm_cfg[model_key]
 
-    if provider == "openai":
+    if provider == "chatgpt":
         api_key = _resolve_api_key("OPENAI_API_KEY")
         kwargs = dict(
             model=model_name,
@@ -65,7 +78,7 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
             kwargs["seed"] = llm_cfg["seed"]
         return ChatOpenAI(**kwargs)
 
-    elif provider == "mixtral":
+    elif provider == "mistral":
         api_key = _resolve_api_key("MISTRAL_API_KEY")
         return ChatMistralAI(
             model=model_name,
@@ -77,7 +90,7 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
     else:
         raise ValueError(
             f"Unsupported provider: '{provider}'. "
-            "Set llm_provider to 'openai', 'mixtral', or 'openrouter' "
+            "Set llm_provider to 'chatgpt', 'mistral', or 'openrouter' "
             "in configs/llm_config.yaml."
         )
 
@@ -153,7 +166,7 @@ _ROBOT_CONTEXT = (
 class Agents:
     """LangChain-based robot task-planning agents.
 
-    Supports OpenAI (GPT-4o), Mixtral (via Mistral AI API / Pixtral for vision),
+    Supports ChatGPT (GPT-4o), Mistral (via Mistral AI API / Pixtral for vision),
     and OpenRouter's OpenAI-compatible API.
     The active provider and model parameters are read from:
         configs/llm_config.yaml      — provider selection
@@ -166,12 +179,12 @@ class Agents:
         task_description: Natural-language description of the task to solve.
     """
 
-    def __init__(self, image: str, task_description: str):
+    def __init__(self, image: str, task_description: str, llm_provider: str | None = None):
         self.encoded_image = image
         self.task_description = task_description
 
         master_cfg = get_config("llm_config")
-        self.provider = master_cfg["llm_provider"]
+        self.provider = _canonical_provider(llm_provider or master_cfg["llm_provider"])
 
         llm_cfg_path = _ROOT / "configs" / "llm" / f"{self.provider}.yaml"
         if not llm_cfg_path.exists():
@@ -182,7 +195,7 @@ class Agents:
         llm_cfg = read_yaml(llm_cfg_path)
 
         # Two LLM instances: one with vision for scene understanding, one text-only for planning.
-        # For OpenAI the same model handles both; for Mixtral, Pixtral handles vision.
+        # For ChatGPT the same model handles both; for Mistral, Pixtral handles vision.
         self._vision_llm = _build_llm(self.provider, llm_cfg, vision=True)
         self._text_llm = _build_llm(self.provider, llm_cfg, vision=False)
 
@@ -236,7 +249,7 @@ class Agents:
         Stage 1 (vision LLM): Extract spatial relation triples from the image.
         Stage 2 (vision LLM): Build a high-level scene description using Stage 1 names.
         Stage 3 (text LLM):   Generate the action plan using the Stage 2 description.
-                              This stage can use Mixtral (text-only) when configured.
+                              This stage can use Mistral (text-only) when configured.
 
         Returns:
             Tuple of (environment_info, description_info, plan).
@@ -270,7 +283,7 @@ class Agents:
         )
         description_info = self._invoke_vision(desc_prompt)
 
-        # --- Stage 3: planning agent (text only — benefits from Mixtral's reasoning) ---
+        # --- Stage 3: planning agent (text only — benefits from Mistral's reasoning) ---
         system_prompt = (
             f"{_ROBOT_CONTEXT}\n\n"
             "You have the following detailed scene description and preliminary instructions "

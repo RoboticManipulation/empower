@@ -55,7 +55,11 @@ class Detection:
                     grasp_object
                 )
 
-        agents = Agents(encoded_image, task_description)
+        agents = Agents(
+            encoded_image,
+            task_description,
+            llm_provider=getattr(self.loader_instance, "llm_provider", None),
+        )
         # self.single_agent_info = agents.single_agent() 
 
         environment_agent_info, description_agent_info, planning_agent_info = agents.multi_agent_vision_planning()

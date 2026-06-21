@@ -8,6 +8,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from std_msgs.msg import Bool
+
 from utils.common_utils import CameraInfoInput
 from utils.common_utils import ImageInput
 from utils.common_utils import PointCloudInput
@@ -35,6 +37,9 @@ class EmpowerSemanticPlacementWrapper:
         *,
         mode: str | None = None,
         segmentation: Any | None = None,
+        simulation: bool | None = None,
+        output_root: str | os.PathLike[str] | None = None,
+        ai: str | None = None,
     ) -> None:
         _ensure_src_on_path()
 
@@ -69,7 +74,8 @@ class EmpowerSemanticPlacementWrapper:
         self.default_show_window = _required_bool(visualization_config, "show_window")
 
         self.images_root: str | os.PathLike[str] | None = None
-        self.output_root: str | os.PathLike[str] | None = None
+        self.output_root: str | os.PathLike[str] | None = output_root
+        self.ai = _canonical_llm_provider(ai) if ai is not None else None
         self.grasp_object: str | None = None
         self.image = None
         self.pointcloud = None
@@ -112,7 +118,6 @@ class EmpowerSemanticPlacementWrapper:
         camera_info: CameraInfoInput = None,
         frame_id: str | None = None,
         images_root: str | os.PathLike[str] | None = None,
-        output_root: str | os.PathLike[str] | None = None,
     ) -> None:
         """Set scene-specific inputs for the next semantic placement run."""
 
@@ -128,7 +133,6 @@ class EmpowerSemanticPlacementWrapper:
         self.camera_info = load_camera_info(camera_info)
         self.frame_id = resolved_frame_id
         self.images_root = images_root
-        self.output_root = output_root
         self.scan_dir = None
         self.dump_dir = None
         self.semantic_placement_result = None
@@ -163,6 +167,7 @@ class EmpowerSemanticPlacementWrapper:
             semantic_refined_mode=self.refined_mode,
             semantic_mode_config=self.mode_config,
             semantic_placement_config=self.config,
+            llm_provider=self.ai,
             loader_instance=self.loader_instance,
         )
 
@@ -225,6 +230,7 @@ def _build_semantic_loader(
     semantic_refined_mode: str,
     semantic_mode_config: Mapping[str, Any],
     semantic_placement_config: Mapping[str, Any],
+    llm_provider: str | None = None,
     loader_instance: Any | None = None,
 ):
     _ensure_src_on_path()
@@ -245,6 +251,7 @@ def _build_semantic_loader(
     loader_instance.semantic_refined_mode = semantic_refined_mode
     loader_instance.semantic_mode_config = dict(semantic_mode_config)
     loader_instance.semantic_placement_config = dict(semantic_placement_config)
+    loader_instance.llm_provider = llm_provider
     return loader_instance
 
 
@@ -300,6 +307,17 @@ def _canonical_detector_backend(detector_backend: str) -> str:
     if backend in {"yolo", "yolo-world", "yolo_world", "yoloworld", "yolow"}:
         return "yolow"
     raise ValueError("detector_backend must be one of: sam3, yolow")
+
+
+def _canonical_llm_provider(ai: str) -> str:
+    provider = str(ai).strip().lower()
+    if provider in {"chatgpt", "openai", "gpt"}:
+        return "chatgpt"
+    if provider == "mistral":
+        return "mistral"
+    if provider in {"openrouter", "open_router"}:
+        return "openrouter"
+    raise ValueError("ai must be one of: chatgpt, mistral, openrouter")
 
 
 def _required_mapping(config: Mapping[str, Any], key: str) -> Mapping[str, Any]:
