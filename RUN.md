@@ -10,6 +10,11 @@ Defaults for semantic placement live in `configs/empower.yaml`:
 
 CLI aliases map to the YAML mode keys: `--mode original` uses the first key under `mode:`, and `--mode refined` uses the second.
 
+Optional camera arguments for `visualize_semantic_placement.py`:
+
+- `--camera-info`: intrinsics JSON (for example `camera_intrinsics.json`)
+- `--camera-extrinsics`: extrinsics as `.json` or `.npy` (for example `camera_extrinsics.json` or `T_wrist_cam.npy`)
+
 To switch detector or offset for a run, edit the matching block in `configs/empower.yaml` before launching `visualize_semantic_placement.py`.
 
 ### Refined semantic placement
@@ -28,6 +33,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-extrinsics ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_extrinsics.json \
   --mode refined \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb0_refined_sam3
@@ -43,6 +49,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-extrinsics ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_extrinsics.json \
   --mode refined \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_refined_yolow
@@ -65,6 +72,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_0.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-extrinsics ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_extrinsics.json \
   --mode original \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_sam3
@@ -80,6 +88,7 @@ python3 ~/ws/packages/empower/src/visualize_semantic_placement.py \
   ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/place/7/pc_3.pcd \
   --grasp-object "ketchup bottle" \
   --camera-info ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_intrinsics.json \
+  --camera-extrinsics ~/ws/packages/geo_sem_place_dataset/scenes/real_world/orbbec_gemini_336/camera_extrinsics.json \
   --mode original \
   --no-window \
   --write-prefix ~/ws/packages/empower/output/semantic_placement_compare/ketchup_rgb3_baseline_yolow

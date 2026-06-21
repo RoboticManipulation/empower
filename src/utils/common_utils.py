@@ -16,6 +16,7 @@ from PIL import Image
 ImageInput = str | os.PathLike[str] | np.ndarray | Image.Image
 PointCloudInput = str | os.PathLike[str] | o3d.geometry.PointCloud | np.ndarray
 CameraInfoInput = str | os.PathLike[str] | Mapping[str, Any] | None
+CameraExtrinsicsInput = str | os.PathLike[str] | Mapping[str, Any] | np.ndarray | None
 
 def read_json(path: str) -> dict:
     path = os.path.abspath(path)
@@ -158,6 +159,33 @@ def load_camera_intrinsics(camera_info: str | os.PathLike[str] | Mapping[str, An
     )
 
 
+def load_camera_extrinsics(camera_extrinsics: CameraExtrinsicsInput) -> dict[str, Any] | None:
+    if camera_extrinsics is None:
+        return None
+    if isinstance(camera_extrinsics, np.ndarray):
+        matrix = np.asarray(camera_extrinsics, dtype=float)
+        if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+            raise ValueError("camera_extrinsics arrays must be finite 4x4 transforms")
+        return {"matrix": matrix.tolist()}
+    if isinstance(camera_extrinsics, Mapping):
+        return dict(camera_extrinsics)
+    if isinstance(camera_extrinsics, (str, os.PathLike)):
+        path = existing_path(camera_extrinsics, "camera_extrinsics")
+        suffix = path.suffix.lower()
+        if suffix == ".npy":
+            matrix = np.asarray(np.load(path), dtype=float)
+            if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+                raise ValueError(f"camera_extrinsics npy must contain a finite 4x4 transform: {path}")
+            return {"matrix": matrix.tolist(), "source_format": "npy"}
+        if suffix == ".json":
+            loaded = read_json(path)
+            if not isinstance(loaded, dict):
+                raise ValueError("camera_extrinsics JSON must load to a JSON object")
+            return loaded
+        raise ValueError(f"Unsupported camera_extrinsics file type: {path.suffix}")
+    raise ValueError(f"Unsupported camera_extrinsics type: {type(camera_extrinsics)}")
+
+
 def resolve_empower_roots(
     *,
     images_root: str | os.PathLike[str] | None,
@@ -194,12 +222,18 @@ def write_camera_info(camera_info: Mapping[str, Any], destination_path: Path) ->
     save_json(destination_path, dict(camera_info))
 
 
+def write_camera_extrinsics(camera_extrinsics: Mapping[str, Any], destination_path: Path) -> None:
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    save_json(destination_path, dict(camera_extrinsics))
+
+
 def stage_semantic_placement_inputs(
     *,
     mode: str,
     image: Image.Image,
     pointcloud: o3d.geometry.PointCloud,
     camera_info: Mapping[str, Any] | None,
+    camera_extrinsics: Mapping[str, Any] | None,
     grasp_object: str,
     images_root: str | os.PathLike[str] | None,
     output_root: str | os.PathLike[str] | None,
@@ -221,6 +255,12 @@ def stage_semantic_placement_inputs(
         write_camera_info(camera_info, staged_camera_info)
     elif staged_camera_info.exists():
         staged_camera_info.unlink()
+
+    staged_camera_extrinsics = dump_dir / "camera_extrinsics.json"
+    if camera_extrinsics is not None:
+        write_camera_extrinsics(camera_extrinsics, staged_camera_extrinsics)
+    elif staged_camera_extrinsics.exists():
+        staged_camera_extrinsics.unlink()
 
     with open(dump_dir / "grasp_object.txt", "w", encoding="utf-8") as grasp_file:
         grasp_file.write(str(grasp_object).strip())

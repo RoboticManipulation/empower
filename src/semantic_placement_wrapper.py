@@ -10,10 +10,12 @@ from typing import Any
 
 from std_msgs.msg import Bool
 
+from utils.common_utils import CameraExtrinsicsInput
 from utils.common_utils import CameraInfoInput
 from utils.common_utils import ImageInput
 from utils.common_utils import PointCloudInput
 from utils.common_utils import get_config
+from utils.common_utils import load_camera_extrinsics
 from utils.common_utils import load_camera_info
 from utils.common_utils import load_image
 from utils.common_utils import load_pointcloud
@@ -40,6 +42,8 @@ class EmpowerSemanticPlacementWrapper:
         simulation: bool | None = None,
         output_root: str | os.PathLike[str] | None = None,
         ai: str | None = None,
+        camera_info: CameraInfoInput = None,
+        camera_extrinsics: CameraExtrinsicsInput = None,
     ) -> None:
         _ensure_src_on_path()
 
@@ -79,7 +83,8 @@ class EmpowerSemanticPlacementWrapper:
         self.grasp_object: str | None = None
         self.image = None
         self.pointcloud = None
-        self.camera_info: dict[str, Any] | None = None
+        self.camera_info = load_camera_info(camera_info)
+        self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
         self.scan_dir: Path | None = None
         self.dump_dir: Path | None = None
         self.semantic_placement_result: dict[str, Any] | None = None
@@ -116,6 +121,7 @@ class EmpowerSemanticPlacementWrapper:
         image: ImageInput,
         pointcloud: PointCloudInput,
         camera_info: CameraInfoInput = None,
+        camera_extrinsics: CameraExtrinsicsInput = None,
         frame_id: str | None = None,
         images_root: str | os.PathLike[str] | None = None,
     ) -> None:
@@ -130,7 +136,10 @@ class EmpowerSemanticPlacementWrapper:
         self.grasp_object = str(grasp_object).strip()
         self.image = load_image(image)
         self.pointcloud = load_pointcloud(pointcloud)
-        self.camera_info = load_camera_info(camera_info)
+        if camera_info is not None:
+            self.camera_info = load_camera_info(camera_info)
+        if camera_extrinsics is not None:
+            self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
         self.frame_id = resolved_frame_id
         self.images_root = images_root
         self.scan_dir = None
@@ -147,6 +156,7 @@ class EmpowerSemanticPlacementWrapper:
             image=self.image,
             pointcloud=self.pointcloud,
             camera_info=self.camera_info,
+            camera_extrinsics=self.camera_extrinsics,
             grasp_object=self.grasp_object,
             images_root=self.images_root,
             output_root=self.output_root,
