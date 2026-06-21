@@ -86,7 +86,11 @@ class EmpowerSemanticPlacementWrapper:
         self.pointcloud_origin = "camera"
         self.camera_info = _checked_camera_info(camera_info)
         self.camera_info_format = _camera_info_format(self.camera_info)
-        self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
+        self.simulation = bool(simulation)
+        self.camera_extrinsics = load_camera_extrinsics(
+            camera_extrinsics,
+            simulation=self.simulation,
+        )
         self.scan_dir: Path | None = None
         self.dump_dir: Path | None = None
         self.semantic_placement_result: dict[str, Any] | None = None
@@ -144,7 +148,10 @@ class EmpowerSemanticPlacementWrapper:
             self.camera_info = _checked_camera_info(camera_info)
             self.camera_info_format = _camera_info_format(self.camera_info)
         if camera_extrinsics is not None:
-            self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
+            self.camera_extrinsics = load_camera_extrinsics(
+                camera_extrinsics,
+                simulation=self.simulation,
+            )
         self.pointcloud_origin = resolved_pointcloud_origin
         self.frame_id = resolved_frame_id
         self.images_root = images_root

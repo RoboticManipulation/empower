@@ -8,8 +8,8 @@ visualization:
 
 mode:
   original:
-    relation_offset_m: 0.15
+    relation_offset_m: 0.05
     detector_backend: "sam3"
   refined:
-    relation_offset_m: 0.15
+    relation_offset_m: 0.05
     detector_backend: "sam3"

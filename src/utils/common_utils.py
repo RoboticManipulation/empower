@@ -181,14 +181,80 @@ def load_camera_intrinsics(camera_info: str | os.PathLike[str] | Mapping[str, An
     )
 
 
-def load_camera_extrinsics(camera_extrinsics: CameraExtrinsicsInput) -> dict[str, Any] | None:
+def _default_T_wrist_cam_path() -> Path:
+    env_path = os.environ.get("T_WRIST_CAM_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
+    return (
+        Path.home()
+        / "ws/src/placeability_scoring/placeability_scoring/camera_extrinsics/T_wrist_cam.npy"
+    )
+
+
+def _load_T_wrist_cam(path: str | os.PathLike[str] | None = None) -> np.ndarray:
+    resolved = Path(path).expanduser() if path is not None else _default_T_wrist_cam_path()
+    matrix = np.asarray(np.load(resolved), dtype=float)
+    if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+        raise ValueError(f"T_wrist_cam must be a finite 4x4 transform: {resolved}")
+    return matrix
+
+
+def _validate_transform_matrix(matrix: np.ndarray, name: str) -> np.ndarray:
+    matrix = np.asarray(matrix, dtype=float)
+    if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+        raise ValueError(f"{name} must be a finite 4x4 transform")
+    return matrix
+
+
+def _is_place_pose_wrist_npy(path: Path) -> bool:
+    return path.suffix.lower() == ".npy" and path.name.startswith("place_pose_wrist_")
+
+
+def _place_pose_wrist_to_camera_pose(
+    wrist_pose: np.ndarray,
+    *,
+    simulation: bool = False,
+    T_wrist_cam_path: str | os.PathLike[str] | None = None,
+) -> np.ndarray:
+    wrist_pose = _validate_transform_matrix(wrist_pose, "place_pose_wrist")
+    if simulation:
+        return wrist_pose
+    return wrist_pose @ _load_T_wrist_cam(T_wrist_cam_path)
+
+
+def _camera_extrinsics_dict(
+    matrix: np.ndarray,
+    *,
+    source_format: str | None = None,
+    input_format: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "matrix": _validate_transform_matrix(matrix, "camera_extrinsics").tolist(),
+        "parent_frame": "world",
+        "child_frame": "camera_color_optical_frame",
+    }
+    if source_format is not None:
+        payload["source_format"] = source_format
+    if input_format is not None:
+        payload["input_format"] = input_format
+    return payload
+
+
+def load_camera_extrinsics(
+    camera_extrinsics: CameraExtrinsicsInput,
+    *,
+    simulation: bool = False,
+    T_wrist_cam_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any] | None:
     if camera_extrinsics is None:
         return None
     if isinstance(camera_extrinsics, np.ndarray):
-        matrix = np.asarray(camera_extrinsics, dtype=float)
-        if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
-            raise ValueError("camera_extrinsics arrays must be finite 4x4 transforms")
-        return {"matrix": matrix.tolist()}
+        matrix = _place_pose_wrist_to_camera_pose(
+            camera_extrinsics,
+            simulation=simulation,
+            T_wrist_cam_path=T_wrist_cam_path,
+        )
+        return _camera_extrinsics_dict(matrix, input_format="place_pose_wrist")
     if isinstance(camera_extrinsics, Mapping):
         return dict(camera_extrinsics)
     if isinstance(camera_extrinsics, (str, os.PathLike)):
@@ -196,9 +262,21 @@ def load_camera_extrinsics(camera_extrinsics: CameraExtrinsicsInput) -> dict[str
         suffix = path.suffix.lower()
         if suffix == ".npy":
             matrix = np.asarray(np.load(path), dtype=float)
-            if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
-                raise ValueError(f"camera_extrinsics npy must contain a finite 4x4 transform: {path}")
-            return {"matrix": matrix.tolist(), "source_format": "npy"}
+            if _is_place_pose_wrist_npy(path):
+                matrix = _place_pose_wrist_to_camera_pose(
+                    matrix,
+                    simulation=simulation,
+                    T_wrist_cam_path=T_wrist_cam_path,
+                )
+                return _camera_extrinsics_dict(
+                    matrix,
+                    source_format="npy",
+                    input_format="place_pose_wrist",
+                )
+            return _camera_extrinsics_dict(
+                _validate_transform_matrix(matrix, "camera_extrinsics"),
+                source_format="npy",
+            )
         if suffix == ".json":
             loaded = read_json(path)
             if not isinstance(loaded, dict):
