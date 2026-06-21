@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Mapping
 
@@ -41,8 +42,12 @@ def get_semantic_reference_geometry(
         print("[WARN] camera_info.json missing; semantic references disabled.")
         return {}
 
+    projection_points = projection_pointcloud_points(loader_instance, placement_pointcloud)
+    if projection_points is None:
+        return {}
+
     projection = project_pointcloud_to_image(
-        placement_pointcloud,
+        projection_points,
         intrinsics,
         image.shape[:2],
     )
@@ -121,6 +126,94 @@ def load_camera_intrinsics(loader_instance: Any) -> dict[str, float] | None:
     raise ValueError(
         f"{cam_path} must contain fx/fy/cx/cy, K, or camera_matrix.data"
     )
+
+
+def pointcloud_origin(loader_instance: Any) -> str:
+    origin = getattr(loader_instance, "semantic_pointcloud_origin", "camera")
+    return str(origin).strip().lower() or "camera"
+
+
+def projection_pointcloud_points(
+    loader_instance: Any,
+    placement_pointcloud: np.ndarray,
+) -> np.ndarray | None:
+    origin = pointcloud_origin(loader_instance)
+    if origin == "camera":
+        return placement_pointcloud
+    if origin != "world":
+        print(f"[WARN] Unsupported pointcloud origin '{origin}'; semantic references disabled.")
+        return None
+
+    world_to_camera = load_world_to_camera_transform(loader_instance)
+    if world_to_camera is None:
+        print("[WARN] camera_extrinsics.json missing or invalid for world point cloud; semantic references disabled.")
+        return None
+    return transform_points(placement_pointcloud, world_to_camera)
+
+
+def load_world_to_camera_transform(loader_instance: Any) -> np.ndarray | None:
+    extrinsics_path = os.path.join(loader_instance.DUMP_DIR, "camera_extrinsics.json")
+    if not os.path.exists(extrinsics_path):
+        return None
+
+    info = read_json(extrinsics_path)
+    matrix = extrinsics_to_matrix(info)
+    if matrix is None:
+        return None
+
+    parent_frame = str(info.get("parent_frame", "")).lower() if isinstance(info, Mapping) else ""
+    child_frame = str(info.get("child_frame", "")).lower() if isinstance(info, Mapping) else ""
+    if "camera" in parent_frame or "optical" in parent_frame:
+        return matrix
+    if "camera" in child_frame or "optical" in child_frame:
+        return np.linalg.inv(matrix)
+    return np.linalg.inv(matrix)
+
+
+def extrinsics_to_matrix(info: Any) -> np.ndarray | None:
+    if not isinstance(info, Mapping):
+        return None
+    if "matrix" in info:
+        matrix = np.asarray(info["matrix"], dtype=float)
+        if matrix.shape == (4, 4) and np.isfinite(matrix).all():
+            return matrix
+        return None
+    if "translation" in info and "rotation_quaternion" in info:
+        translation = info["translation"]
+        quaternion = info["rotation_quaternion"]
+        matrix = np.eye(4, dtype=float)
+        matrix[:3, :3] = quaternion_to_rotation_matrix(
+            float(quaternion["x"]),
+            float(quaternion["y"]),
+            float(quaternion["z"]),
+            float(quaternion["w"]),
+        )
+        matrix[:3, 3] = [
+            float(translation["x"]),
+            float(translation["y"]),
+            float(translation["z"]),
+        ]
+        return matrix
+    return None
+
+
+def quaternion_to_rotation_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
+    norm = math.sqrt(x * x + y * y + z * z + w * w)
+    if norm <= 1e-12:
+        raise ValueError("camera_extrinsics quaternion must be non-zero")
+    x, y, z, w = x / norm, y / norm, z / norm, w / norm
+    return np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        dtype=float,
+    )
+
+
+def transform_points(points: np.ndarray, transform: np.ndarray) -> np.ndarray:
+    return points @ transform[:3, :3].T + transform[:3, 3]
 
 
 def project_pointcloud_to_image(
@@ -223,6 +316,8 @@ __all__ = [
     "load_camera_intrinsics",
     "load_pointcloud_points",
     "points_for_detection_mask",
+    "pointcloud_origin",
     "project_pointcloud_to_image",
+    "projection_pointcloud_points",
     "summarize_object_points",
 ]

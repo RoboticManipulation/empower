@@ -83,7 +83,9 @@ class EmpowerSemanticPlacementWrapper:
         self.grasp_object: str | None = None
         self.image = None
         self.pointcloud = None
-        self.camera_info = load_camera_info(camera_info)
+        self.pointcloud_origin = "camera"
+        self.camera_info = _checked_camera_info(camera_info)
+        self.camera_info_format = _camera_info_format(self.camera_info)
         self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
         self.scan_dir: Path | None = None
         self.dump_dir: Path | None = None
@@ -122,6 +124,7 @@ class EmpowerSemanticPlacementWrapper:
         pointcloud: PointCloudInput,
         camera_info: CameraInfoInput = None,
         camera_extrinsics: CameraExtrinsicsInput = None,
+        pointcloud_origin: str = "camera",
         frame_id: str | None = None,
         images_root: str | os.PathLike[str] | None = None,
     ) -> None:
@@ -132,14 +135,17 @@ class EmpowerSemanticPlacementWrapper:
             raise ValueError("grasp_object is required for semantic placement")
         if not resolved_frame_id:
             raise ValueError("frame_id is required for semantic placement")
+        resolved_pointcloud_origin = _canonical_pointcloud_origin(pointcloud_origin)
 
         self.grasp_object = str(grasp_object).strip()
         self.image = load_image(image)
         self.pointcloud = load_pointcloud(pointcloud)
         if camera_info is not None:
-            self.camera_info = load_camera_info(camera_info)
+            self.camera_info = _checked_camera_info(camera_info)
+            self.camera_info_format = _camera_info_format(self.camera_info)
         if camera_extrinsics is not None:
             self.camera_extrinsics = load_camera_extrinsics(camera_extrinsics)
+        self.pointcloud_origin = resolved_pointcloud_origin
         self.frame_id = resolved_frame_id
         self.images_root = images_root
         self.scan_dir = None
@@ -157,6 +163,7 @@ class EmpowerSemanticPlacementWrapper:
             pointcloud=self.pointcloud,
             camera_info=self.camera_info,
             camera_extrinsics=self.camera_extrinsics,
+            pointcloud_origin=self.pointcloud_origin,
             grasp_object=self.grasp_object,
             images_root=self.images_root,
             output_root=self.output_root,
@@ -172,6 +179,7 @@ class EmpowerSemanticPlacementWrapper:
             frame_id=self.frame_id,
             detector_backend=self.detector_backend,
             relation_offset_m=self.relation_offset_m,
+            pointcloud_origin=self.pointcloud_origin,
             semantic_placement_modes=self.semantic_placement_modes,
             semantic_default_mode=self.default_mode,
             semantic_refined_mode=self.refined_mode,
@@ -235,6 +243,7 @@ def _build_semantic_loader(
     frame_id: str,
     detector_backend: str,
     relation_offset_m: float,
+    pointcloud_origin: str,
     semantic_placement_modes: tuple[str, ...],
     semantic_default_mode: str,
     semantic_refined_mode: str,
@@ -256,6 +265,7 @@ def _build_semantic_loader(
     loader_instance.detector_backend = detector_backend
     loader_instance.mode = mode
     loader_instance.semantic_relation_offset_m = relation_offset_m
+    loader_instance.semantic_pointcloud_origin = pointcloud_origin
     loader_instance.semantic_placement_modes = semantic_placement_modes
     loader_instance.semantic_default_mode = semantic_default_mode
     loader_instance.semantic_refined_mode = semantic_refined_mode
@@ -319,6 +329,33 @@ def _canonical_detector_backend(detector_backend: str) -> str:
     raise ValueError("detector_backend must be one of: sam3, yolow")
 
 
+def _checked_camera_info(camera_info: CameraInfoInput) -> dict[str, Any] | None:
+    loaded = load_camera_info(camera_info)
+    _camera_info_format(loaded)
+    return loaded
+
+
+def _camera_info_format(camera_info: Mapping[str, Any] | None) -> str | None:
+    if camera_info is None:
+        return None
+    if "K" in camera_info:
+        k_values = camera_info["K"]
+        try:
+            import numpy as np
+
+            matrix = np.asarray(k_values, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("camera_info K must be numeric") from exc
+        if matrix.shape not in {(3, 3), (9,)}:
+            raise ValueError(f"camera_info K must be a 3x3 matrix or 9 values, got shape {matrix.shape}")
+        if set(camera_info).issubset({"K", "camera_info_format"}):
+            return "K"
+        return "complete"
+    if "camera_matrix" in camera_info or {"fx", "fy", "cx", "cy"}.issubset(camera_info):
+        return "complete"
+    raise ValueError("camera_info must be a full camera_info object or a 3x3 K matrix")
+
+
 def _canonical_llm_provider(ai: str) -> str:
     provider = str(ai).strip().lower()
     if provider in {"chatgpt", "openai", "gpt"}:
@@ -328,6 +365,13 @@ def _canonical_llm_provider(ai: str) -> str:
     if provider in {"openrouter", "open_router"}:
         return "openrouter"
     raise ValueError("ai must be one of: chatgpt, mistral, openrouter")
+
+
+def _canonical_pointcloud_origin(pointcloud_origin: str) -> str:
+    origin = str(pointcloud_origin).strip().lower()
+    if origin in {"camera", "world"}:
+        return origin
+    raise ValueError("pointcloud_origin must be one of: camera, world")
 
 
 def _required_mapping(config: Mapping[str, Any], key: str) -> Mapping[str, Any]:

@@ -26,6 +26,7 @@ def main() -> None:
         grasp_object=args.grasp_object,
         image=args.image,
         pointcloud=args.pointcloud,
+        pointcloud_origin=args.pointcloud_origin,
         images_root=args.images_root,
     )
     wrapper.run()
@@ -52,12 +53,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera-info",
         type=Path,
-        help="Optional camera_info.json for image/point-cloud grounding",
+        help="Optional full camera_info JSON or bare 3x3 K intrinsics (.json/.npy) for image/point-cloud grounding",
     )
     parser.add_argument(
         "--camera-extrinsics",
         type=Path,
         help="Optional camera extrinsics (.json or .npy) for world-to-camera projection",
+    )
+    parser.add_argument(
+        "--pointcloud-origin",
+        choices=("camera", "world"),
+        default="camera",
+        help="Coordinate frame of the input point cloud. Defaults to camera.",
     )
     parser.add_argument(
         "--mode",

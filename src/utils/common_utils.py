@@ -7,7 +7,7 @@ import json
 import yaml
 import os
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import open3d as o3d
@@ -15,7 +15,7 @@ from PIL import Image
 
 ImageInput = str | os.PathLike[str] | np.ndarray | Image.Image
 PointCloudInput = str | os.PathLike[str] | o3d.geometry.PointCloud | np.ndarray
-CameraInfoInput = str | os.PathLike[str] | Mapping[str, Any] | None
+CameraInfoInput = str | os.PathLike[str] | Mapping[str, Any] | Sequence[Sequence[float]] | np.ndarray | None
 CameraExtrinsicsInput = str | os.PathLike[str] | Mapping[str, Any] | np.ndarray | None
 
 def read_json(path: str) -> dict:
@@ -117,15 +117,37 @@ def load_camera_info(camera_info: CameraInfoInput) -> dict[str, Any] | None:
     if camera_info is None:
         return None
     if isinstance(camera_info, (str, os.PathLike)):
-        loaded = read_json(existing_path(camera_info, "camera_info"))
+        path = existing_path(camera_info, "camera_info")
+        suffix = path.suffix.lower()
+        if suffix == ".npy":
+            return camera_k_to_info(np.load(path))
+        loaded = read_json(path)
     elif isinstance(camera_info, Mapping):
         loaded = dict(camera_info)
+    elif isinstance(camera_info, np.ndarray) or isinstance(camera_info, Sequence):
+        return camera_k_to_info(camera_info)
     else:
         raise ValueError(f"Unsupported camera_info type: {type(camera_info)}")
 
     if not isinstance(loaded, dict):
-        raise ValueError("camera_info must load to a JSON object")
+        raise ValueError("camera_info must load to a JSON object or a 3x3 K matrix")
+    if "K" in loaded:
+        loaded["K"] = camera_k_values(loaded["K"])
+        return loaded
     return loaded
+
+
+def camera_k_to_info(camera_k: Any) -> dict[str, Any]:
+    return {"K": camera_k_values(camera_k), "camera_info_format": "K"}
+
+
+def camera_k_values(camera_k: Any) -> list[float]:
+    matrix = np.asarray(camera_k, dtype=float)
+    if matrix.shape == (3, 3):
+        matrix = matrix.reshape(-1)
+    if matrix.shape != (9,) or not np.isfinite(matrix).all():
+        raise ValueError(f"camera_info K must be a finite 3x3 matrix or 9 values, got shape {matrix.shape}")
+    return matrix.astype(float).tolist()
 
 
 def load_camera_intrinsics(camera_info: str | os.PathLike[str] | Mapping[str, Any]) -> dict[str, float]:
@@ -234,6 +256,7 @@ def stage_semantic_placement_inputs(
     pointcloud: o3d.geometry.PointCloud,
     camera_info: Mapping[str, Any] | None,
     camera_extrinsics: Mapping[str, Any] | None,
+    pointcloud_origin: str,
     grasp_object: str,
     images_root: str | os.PathLike[str] | None,
     output_root: str | os.PathLike[str] | None,
@@ -261,6 +284,8 @@ def stage_semantic_placement_inputs(
         write_camera_extrinsics(camera_extrinsics, staged_camera_extrinsics)
     elif staged_camera_extrinsics.exists():
         staged_camera_extrinsics.unlink()
+
+    save_json(dump_dir / "pointcloud_origin.json", {"origin": str(pointcloud_origin).strip().lower()})
 
     with open(dump_dir / "grasp_object.txt", "w", encoding="utf-8") as grasp_file:
         grasp_file.write(str(grasp_object).strip())
