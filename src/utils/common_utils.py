@@ -343,8 +343,9 @@ def stage_semantic_placement_inputs(
         images_root=images_root,
         output_root=output_root,
     )
-    scan_dir = scan_root / mode
-    dump_dir = dump_root / mode
+    # Custom roots are used flat; default Empower package dirs keep per-mode subfolders.
+    scan_dir = scan_root if images_root is not None else scan_root / mode
+    dump_dir = dump_root if output_root is not None else dump_root / mode
     scan_dir.mkdir(parents=True, exist_ok=True)
     dump_dir.mkdir(parents=True, exist_ok=True)
 
