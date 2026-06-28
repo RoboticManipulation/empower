@@ -41,6 +41,7 @@ def run_grounded_semantic_placement(
     relation_offset_m = semantic_relation_offset_m(loader_instance)
 
     if mode == semantic_refined_mode(loader_instance):
+        shelf_board_heights = semantic_shelf_board_heights(loader_instance)
         result = get_semantic_placement_coordinates_from_plan(
             planning_text,
             placement_pointclouds=placement_pointcloud,
@@ -48,6 +49,7 @@ def run_grounded_semantic_placement(
             reference_positions_by_name=reference_positions,
             relation_offset_m=relation_offset_m,
             frame_id=semantic_frame_id(loader_instance),
+            shelf_board_heights=shelf_board_heights,
         )
     else:
         result = get_empower_style_semantic_coordinates(
@@ -97,6 +99,13 @@ def semantic_relation_offset_m(loader_instance: Any) -> float:
     return float(loader_instance.semantic_relation_offset_m)
 
 
+def semantic_shelf_board_heights(loader_instance: Any) -> tuple[float, ...] | None:
+    heights = getattr(loader_instance, "semantic_shelf_board_heights", None)
+    if heights is None:
+        return None
+    return tuple(float(height) for height in heights)
+
+
 def get_semantic_grasp_object(loader_instance: Any, required: bool = False) -> str | None:
     candidates = [
         getattr(loader_instance, "grasp_object", None),
@@ -141,4 +150,5 @@ __all__ = [
     "semantic_placement_mode",
     "semantic_refined_mode",
     "semantic_relation_offset_m",
+    "semantic_shelf_board_heights",
 ]

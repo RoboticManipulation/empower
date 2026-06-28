@@ -131,6 +131,7 @@ class EmpowerSemanticPlacementWrapper:
         pointcloud_origin: str = "camera",
         frame_id: str | None = None,
         images_root: str | os.PathLike[str] | None = None,
+        shelf_board_heights: Any | None = None,
     ) -> None:
         """Set scene-specific inputs for the next semantic placement run."""
 
@@ -155,6 +156,7 @@ class EmpowerSemanticPlacementWrapper:
         self.pointcloud_origin = resolved_pointcloud_origin
         self.frame_id = resolved_frame_id
         self.images_root = images_root
+        self.shelf_board_heights = _checked_shelf_board_heights(shelf_board_heights)
         self.scan_dir = None
         self.dump_dir = None
         self.semantic_placement_result = None
@@ -192,6 +194,9 @@ class EmpowerSemanticPlacementWrapper:
             semantic_refined_mode=self.refined_mode,
             semantic_mode_config=self.mode_config,
             semantic_placement_config=self.config,
+            shelf_board_heights=(
+                self.shelf_board_heights if self.mode == self.refined_mode else None
+            ),
             llm_provider=self.ai,
             loader_instance=self.loader_instance,
         )
@@ -272,6 +277,7 @@ def _build_semantic_loader(
     semantic_refined_mode: str,
     semantic_mode_config: Mapping[str, Any],
     semantic_placement_config: Mapping[str, Any],
+    shelf_board_heights: tuple[float, ...] | None = None,
     llm_provider: str | None = None,
     loader_instance: Any | None = None,
 ):
@@ -294,6 +300,7 @@ def _build_semantic_loader(
     loader_instance.semantic_refined_mode = semantic_refined_mode
     loader_instance.semantic_mode_config = dict(semantic_mode_config)
     loader_instance.semantic_placement_config = dict(semantic_placement_config)
+    loader_instance.semantic_shelf_board_heights = shelf_board_heights
     loader_instance.llm_provider = llm_provider
     return loader_instance
 
@@ -395,6 +402,24 @@ def _canonical_pointcloud_origin(pointcloud_origin: str) -> str:
     if origin in {"camera", "world"}:
         return origin
     raise ValueError("pointcloud_origin must be one of: camera, world")
+
+
+def _checked_shelf_board_heights(shelf_board_heights: Any | None) -> tuple[float, ...] | None:
+    if shelf_board_heights is None:
+        return None
+
+    try:
+        import numpy as np
+
+        heights = np.asarray(shelf_board_heights, dtype=float).reshape(-1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("shelf_board_heights must be a numeric sequence") from exc
+
+    if heights.size == 0:
+        return None
+    if not np.isfinite(heights).all():
+        raise ValueError("shelf_board_heights must contain only finite values")
+    return tuple(float(height) for height in heights.tolist())
 
 
 def _required_mapping(config: Mapping[str, Any], key: str) -> Mapping[str, Any]:

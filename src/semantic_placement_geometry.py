@@ -20,6 +20,7 @@ def get_semantic_placement_coordinates_from_plan(
     relation_offset_m: float,
     orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
     frame_id: str,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Convert a semantic placement action plan into camera-frame coordinates."""
 
@@ -41,6 +42,7 @@ def get_semantic_placement_coordinates_from_plan(
         placement_surface_height_m=placement_surface_height_m,
         orientation_rpy=orientation_rpy,
         frame_id=frame_id,
+        shelf_board_heights=shelf_board_heights,
     )
 
     if intent.reference_object and reference_positions_by_name:
@@ -54,7 +56,17 @@ def get_semantic_placement_coordinates_from_plan(
                 reference_position=reference_position,
                 relation=intent.relation,
                 relation_offset_m=relation_offset_m,
+                shelf_board_heights=shelf_board_heights,
             )
+            result["planning_source_line"] = intent.source_line
+            result["relation"] = intent.relation
+            result["relation_offset_m"] = float(relation_offset_m)
+            result["reference_object"] = intent.reference_object
+            result["reference_position"] = {
+                "x": float(reference_position[0]),
+                "y": float(reference_position[1]),
+                "z": float(reference_position[2]),
+            }
 
     return result
 
@@ -66,14 +78,16 @@ def get_semantic_placement_coordinates(
     placement_surface_height_m: float | None = None,
     orientation_rpy: Sequence[float] = (0.0, 0.0, 0.0),
     frame_id: str,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Return a fallback surface placement coordinate from point-cloud data."""
 
     points = _coerce_pointclouds(placement_pointclouds)
-    surface_height = (
-        _coerce_height(placement_surface_height_m, "placement_surface_height_m")
-        if placement_surface_height_m is not None
-        else _infer_default_surface_height(points)
+    shelf_heights = _coerce_optional_heights(shelf_board_heights, "shelf_board_heights")
+    surface_height = _select_surface_height(
+        points,
+        placement_surface_height_m=placement_surface_height_m,
+        shelf_board_heights=shelf_heights,
     )
     surface_xy, support_points = _estimate_surface_xy(points, surface_height)
     coordinates = [float(surface_xy[0]), float(surface_xy[1]), float(surface_height)]
@@ -304,6 +318,7 @@ def apply_relation_offset(
     *,
     relation: str | None,
     relation_offset_m: float,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> np.ndarray:
     coordinate = np.asarray(reference_position, dtype=float).copy()
     offset = abs(float(relation_offset_m))
@@ -313,6 +328,7 @@ def apply_relation_offset(
         coordinate[0] += offset
     elif relation == "up":
         coordinate[1] -= offset
+    coordinate[2] = _snap_height_to_nearest_board(coordinate[2], shelf_board_heights)
     return coordinate
 
 
@@ -428,6 +444,7 @@ def _apply_reference_relation(
     reference_position: np.ndarray,
     relation: str | None,
     relation_offset_m: float,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     updated = dict(result)
     offset = abs(float(relation_offset_m))
@@ -439,10 +456,13 @@ def _apply_reference_relation(
     else:
         return updated
 
+    fallback_height = _result_surface_height(result)
     surface = _candidate_surface_point(
         reference_position=reference_position,
         direction=direction,
         preferred_offset_m=offset,
+        fallback_height=fallback_height,
+        shelf_board_heights=shelf_board_heights,
     )
     coordinates = [float(surface[0]), float(surface[1]), float(surface[2])]
     updated["coordinates"] = coordinates
@@ -465,15 +485,27 @@ def _candidate_surface_point(
     reference_position: np.ndarray,
     direction: float,
     preferred_offset_m: float,
+    fallback_height: float,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> np.ndarray:
     return np.array(
         [
             float(reference_position[0] + direction * preferred_offset_m),
             float(reference_position[1]),
-            float(reference_position[2]),
+            _snap_height_to_nearest_board(reference_position[2], shelf_board_heights, fallback_height),
         ],
         dtype=float,
     )
+
+
+def _result_surface_height(result: Mapping[str, Any]) -> float:
+    surface = result.get("surface_position")
+    if isinstance(surface, Mapping) and "z" in surface:
+        return float(surface["z"])
+    coordinates = result.get("coordinates")
+    if coordinates is not None:
+        return float(np.asarray(coordinates, dtype=float).reshape(-1)[2])
+    return 0.0
 
 
 def _estimate_surface_xy(
@@ -502,6 +534,35 @@ def _estimate_surface_xy(
         min_points_per_cell=min_points_per_cell,
     )
     return _robust_bbox_center(support_points[:, :2]), support_points
+
+
+def _select_surface_height(
+    points: np.ndarray,
+    *,
+    placement_surface_height_m: float | None,
+    shelf_board_heights: np.ndarray | None,
+) -> float:
+    if placement_surface_height_m is not None:
+        return _coerce_height(placement_surface_height_m, "placement_surface_height_m")
+    if shelf_board_heights is not None and shelf_board_heights.size:
+        return _select_shelf_height_with_support(points, shelf_board_heights)
+    return _infer_default_surface_height(points)
+
+
+def _select_shelf_height_with_support(points: np.ndarray, shelf_board_heights: np.ndarray) -> float:
+    z = points[:, 2]
+    z = z[np.isfinite(z)]
+    if z.shape[0] == 0:
+        raise ValueError("placement_pointclouds contains no finite z values")
+
+    best_height = float(shelf_board_heights[0])
+    best_count = -1
+    for height in shelf_board_heights:
+        count = int(np.count_nonzero(np.abs(z - float(height)) <= 0.04))
+        if count > best_count:
+            best_height = float(height)
+            best_count = count
+    return best_height
 
 
 def _infer_default_surface_height(points: np.ndarray) -> float:
@@ -569,6 +630,29 @@ def _coerce_height(value: float, name: str) -> float:
     if not math.isfinite(height):
         raise ValueError(f"{name} must be finite")
     return height
+
+
+def _coerce_optional_heights(values: Sequence[float] | None, name: str) -> np.ndarray | None:
+    if values is None:
+        return None
+    heights = np.asarray(values, dtype=float).reshape(-1)
+    if heights.size == 0:
+        return None
+    if not np.isfinite(heights).all():
+        raise ValueError(f"{name} must contain only finite values")
+    return heights
+
+
+def _snap_height_to_nearest_board(
+    height: float,
+    shelf_board_heights: Sequence[float] | None,
+    fallback_height: float | None = None,
+) -> float:
+    heights = _coerce_optional_heights(shelf_board_heights, "shelf_board_heights")
+    if heights is None:
+        return float(height if fallback_height is None else fallback_height)
+    idx = int(np.argmin(np.abs(heights - float(height))))
+    return float(heights[idx])
 
 
 def _coerce_rpy(orientation_rpy: Sequence[float]) -> tuple[float, float, float]:

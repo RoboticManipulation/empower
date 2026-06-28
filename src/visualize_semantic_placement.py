@@ -40,7 +40,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Set semantic placement inputs, run prediction, and show the returned placement "
-            "coordinate in the input point cloud. Red sphere = returned coordinate."
+            "coordinate in the input point cloud. Red sphere = placement with relation offset; "
+            "black sphere = referenced object center."
         )
     )
     parser.add_argument("image", type=Path, help="Placement scene RGB image")

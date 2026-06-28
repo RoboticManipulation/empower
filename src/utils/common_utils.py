@@ -398,6 +398,17 @@ def surface_from_result(result: Mapping[str, Any]) -> np.ndarray | None:
     return as_point(surface)
 
 
+def reference_from_result(result: Mapping[str, Any]) -> tuple[np.ndarray, str] | None:
+    reference = result.get("reference_position")
+    if reference is None:
+        return None
+    if isinstance(reference, Mapping):
+        reference = [reference["x"], reference["y"], reference["z"]]
+    reference_object = result.get("reference_object")
+    label = str(reference_object).strip() if reference_object else "reference"
+    return as_point(reference), label
+
+
 def as_point(values: object) -> np.ndarray:
     point = np.asarray(values, dtype=float)
     if point.shape != (3,) or not np.isfinite(point).all():
@@ -438,8 +449,12 @@ def semantic_placement_geometries(
 ) -> list[o3d.geometry.Geometry]:
     coordinate = as_point(result["coordinates"])
     surface = surface_from_result(result)
+    reference = reference_from_result(result)
 
     geometries: list[o3d.geometry.Geometry] = [pointcloud]
+    if reference is not None:
+        reference_point, _ = reference
+        geometries.append(sphere(reference_point, marker_radius * 0.85, (0.0, 0.0, 0.0)))
     geometries.append(sphere(coordinate, marker_radius, (1.0, 0.05, 0.05)))
 
     if surface is not None and not np.allclose(coordinate, surface):
@@ -538,21 +553,18 @@ def overlay_projection_point(
     return transform_point(coordinate, world_to_camera)
 
 
-def write_image_overlay(
-    prefix: str | os.PathLike[str],
+def _draw_overlay_marker(
+    bgr_image: np.ndarray,
     *,
-    image: Image.Image,
-    camera_info: Mapping[str, Any],
     coordinate: np.ndarray,
+    intrinsics: Mapping[str, float],
+    color: tuple[int, int, int],
     label: str,
-    camera_extrinsics: Mapping[str, Any] | None = None,
-    pointcloud_origin: str = "camera",
-) -> None:
+    camera_extrinsics: Mapping[str, Any] | None,
+    pointcloud_origin: str,
+) -> bool:
     import cv2
 
-    intrinsics = load_camera_intrinsics(camera_info)
-    rgb_image = np.asarray(image.convert("RGB"))
-    bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
     projection_point = overlay_projection_point(
         coordinate,
         camera_extrinsics=camera_extrinsics,
@@ -560,15 +572,10 @@ def write_image_overlay(
     )
     pixel = project_point_to_image(projection_point, intrinsics, bgr_image.shape[:2])
     if pixel is None:
-        print(
-            "[WARN] placement coordinate projects outside the image; "
-            "skipping 2D image overlay"
-        )
-        return
+        return False
 
     x, y = pixel
     radius = max(10, min(bgr_image.shape[:2]) // 45)
-    color = (0, 0, 255)
     cv2.circle(bgr_image, (x, y), radius, color, thickness=3)
     cv2.drawMarker(
         bgr_image,
@@ -578,10 +585,9 @@ def write_image_overlay(
         markerSize=radius * 3,
         thickness=3,
     )
-    text = f"place {label} here"
     cv2.putText(
         bgr_image,
-        text,
+        label,
         (min(x + radius + 8, bgr_image.shape[1] - 1), max(y - radius, 24)),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -589,6 +595,58 @@ def write_image_overlay(
         2,
         cv2.LINE_AA,
     )
+    return True
+
+
+def write_image_overlay(
+    prefix: str | os.PathLike[str],
+    *,
+    image: Image.Image,
+    camera_info: Mapping[str, Any],
+    coordinate: np.ndarray,
+    label: str,
+    camera_extrinsics: Mapping[str, Any] | None = None,
+    pointcloud_origin: str = "camera",
+    reference_coordinate: np.ndarray | None = None,
+    reference_label: str | None = None,
+) -> None:
+    import cv2
+
+    intrinsics = load_camera_intrinsics(camera_info)
+    rgb_image = np.asarray(image.convert("RGB"))
+    bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+
+    if reference_coordinate is not None:
+        reference_drawn = _draw_overlay_marker(
+            bgr_image,
+            coordinate=reference_coordinate,
+            intrinsics=intrinsics,
+            color=(0, 0, 0),
+            label=reference_label or "reference",
+            camera_extrinsics=camera_extrinsics,
+            pointcloud_origin=pointcloud_origin,
+        )
+        if not reference_drawn:
+            print(
+                "[WARN] reference coordinate projects outside the image; "
+                "skipping reference 2D marker"
+            )
+
+    placement_drawn = _draw_overlay_marker(
+        bgr_image,
+        coordinate=coordinate,
+        intrinsics=intrinsics,
+        color=(0, 0, 255),
+        label=f"place {label} here",
+        camera_extrinsics=camera_extrinsics,
+        pointcloud_origin=pointcloud_origin,
+    )
+    if not placement_drawn:
+        print(
+            "[WARN] placement coordinate projects outside the image; "
+            "skipping 2D image overlay"
+        )
+        return
 
     prefix_path = Path(prefix)
     output_path = prefix_path.with_name(prefix_path.name + "_placement_2d.png")
@@ -638,6 +696,8 @@ def save_semantic_placement_outputs(
         marker_radius=marker_radius,
     )
 
+    reference = reference_from_result(result)
+
     if prefix is not None:
         write_marker_files(prefix, pointcloud_obj, geometries[1:])
         if camera_info is not None and image is not None:
@@ -649,6 +709,8 @@ def save_semantic_placement_outputs(
                 label=label,
                 camera_extrinsics=camera_extrinsics,
                 pointcloud_origin=pointcloud_origin,
+                reference_coordinate=reference[0] if reference is not None else None,
+                reference_label=reference[1] if reference is not None else None,
             )
         else:
             print("[WARN] camera_info not provided; skipping 2D image overlay")
@@ -679,6 +741,7 @@ __all__ = [
     "project_point_to_image",
     "read_json",
     "read_yaml",
+    "reference_from_result",
     "resolve_empower_roots",
     "save_json",
     "save_semantic_placement_outputs",
