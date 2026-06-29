@@ -151,7 +151,10 @@ def _action_instructions_for_task(task_description: str) -> str:
 
 
 def _is_semantic_placement_task(task_description: str) -> bool:
-    return "Use only one action line: DROP" in task_description
+    return (
+        "Use only one action line: DROP" in task_description
+        or "place the grasped object where it semantically belongs" in task_description
+    )
 
 
 _ROBOT_CONTEXT = (
@@ -183,9 +186,21 @@ class Agents:
         task_description: Natural-language description of the task to solve.
     """
 
-    def __init__(self, image: str, task_description: str, llm_provider: str | None = None):
+    def __init__(
+        self,
+        image: str,
+        task_description: str,
+        llm_provider: str | None = None,
+        *,
+        environment_task_description: str | None = None,
+    ):
         self.encoded_image = image
         self.task_description = task_description
+        self.environment_task_description = (
+            environment_task_description
+            if environment_task_description is not None
+            else task_description
+        )
 
         master_cfg = get_config("llm_config")
         self.provider = _canonical_provider(llm_provider or master_cfg["llm_provider"])
@@ -263,7 +278,8 @@ class Agents:
             "You are an assistant able to accurately describe the content of an image.\n"
             "Capture the main objects present and provide all spatial relations between them.\n"
             "Answer only with triples in the form (subject, relation, object) — nothing else.\n"
-            f"Write just the triples essential to solve the following task: {self.task_description}\n"
+            f"Write just the triples essential to solve the following task: "
+            f"{self.environment_task_description}\n"
             "IMPORTANT: Use full, descriptive object names that include the object type "
             "(e.g. 'coca-cola bottle', 'monster energy drink can', 'beer bottle', "
             "'paper towel roll', 'spray bottle', 'windex spray bottle'). "

@@ -10,8 +10,8 @@ import re
 from agents_langchain import Agents
 from semantic_placement_grounding import get_semantic_grasp_object
 from semantic_placement_grounding import run_grounded_semantic_placement
-from semantic_placement_prompts import semantic_placement_empower_task_description
-from semantic_placement_prompts import semantic_placement_refined_task_description
+from semantic_placement_prompts import SEMANTIC_PLACEMENT_PLANNING_TASK
+from semantic_placement_prompts import semantic_placement_task_descriptions
 
 class Detection:
 
@@ -22,12 +22,7 @@ class Detection:
         task_description_shelf = "move the objects in the shelf in order to have for each level of the shelf only the objects made of the same material"
         task_description_shelf2 = "move the objects in the shelf in order to have exactly two objects for level"
         task_description_jacket = "give me the green jacket from the clothing rack"
-        task_description_semantic_placement = (
-            "place the grasped object where it semantically belongs in the scene, "
-            "using only one DROP action with a relation such as left, right, "
-            "or on and a reference object, such as "
-            "'DROP grasped object left to cereal box'"
-        )
+        task_description_semantic_placement = SEMANTIC_PLACEMENT_PLANNING_TASK
         self.task_dict = {
             "order_by_height": task_description_order,
             "exit": task_description_exit,
@@ -45,19 +40,23 @@ class Detection:
             encoded_image = base64.b64encode(im_file.read()).decode("utf-8")
 
         task_description = self.task_dict[task_name]
+        environment_task_description = None
         if task_name == "semantic_placement":
             grasp_object = get_semantic_grasp_object(self.loader_instance, required=True)
-            if self._semantic_refined_mode() is not None and self._semantic_mode() == self._semantic_refined_mode():
-                task_description = semantic_placement_refined_task_description(grasp_object)
-            else:
-                task_description = semantic_placement_empower_task_description(
-                    grasp_object
-                )
+            refined = (
+                self._semantic_refined_mode() is not None
+                and self._semantic_mode() == self._semantic_refined_mode()
+            )
+            environment_task_description, task_description = semantic_placement_task_descriptions(
+                grasp_object,
+                refined=refined,
+            )
 
         agents = Agents(
             encoded_image,
             task_description,
             llm_provider=getattr(self.loader_instance, "llm_provider", None),
+            environment_task_description=environment_task_description,
         )
         # self.single_agent_info = agents.single_agent() 
 
