@@ -22,6 +22,7 @@ from utils.common_utils import load_pointcloud
 from utils.common_utils import print_semantic_placement_result
 from utils.common_utils import save_semantic_placement_outputs
 from utils.common_utils import stage_semantic_placement_inputs
+from semantic_placement_geometry import is_semantic_placement_success
 
 
 class EmpowerSemanticPlacementWrapper:
@@ -81,6 +82,9 @@ class EmpowerSemanticPlacementWrapper:
         self.output_root: str | os.PathLike[str] | None = output_root
         self.ai = _canonical_llm_provider(ai) if ai is not None else None
         self.grasp_object: str | None = None
+        self.grasp_object_image = None
+        self.grasp_object_fallback: str | None = None
+        self._object_descriptor = None
         self.image = None
         self.pointcloud = None
         self.pointcloud_origin = "camera"
@@ -123,9 +127,11 @@ class EmpowerSemanticPlacementWrapper:
     def set_inputs(
         self,
         *,
-        grasp_object: str,
         image: ImageInput,
         pointcloud: PointCloudInput,
+        grasp_object_image: ImageInput | None = None,
+        grasp_object: str | None = None,
+        grasp_object_fallback: str | None = None,
         camera_info: CameraInfoInput = None,
         camera_extrinsics: CameraExtrinsicsInput = None,
         pointcloud_origin: str = "camera",
@@ -136,13 +142,21 @@ class EmpowerSemanticPlacementWrapper:
         """Set scene-specific inputs for the next semantic placement run."""
 
         resolved_frame_id = self.default_frame_id if frame_id is None else str(frame_id).strip()
-        if not grasp_object or not str(grasp_object).strip():
-            raise ValueError("grasp_object is required for semantic placement")
+        if grasp_object_image is None and (not grasp_object or not str(grasp_object).strip()):
+            raise ValueError(
+                "Either grasp_object_image or grasp_object is required for semantic placement"
+            )
         if not resolved_frame_id:
             raise ValueError("frame_id is required for semantic placement")
         resolved_pointcloud_origin = _canonical_pointcloud_origin(pointcloud_origin)
 
-        self.grasp_object = str(grasp_object).strip()
+        self.grasp_object = str(grasp_object).strip() if grasp_object else None
+        self.grasp_object_image = (
+            load_image(grasp_object_image) if grasp_object_image is not None else None
+        )
+        self.grasp_object_fallback = (
+            str(grasp_object_fallback).strip() if grasp_object_fallback else None
+        )
         self.image = load_image(image)
         self.pointcloud = load_pointcloud(pointcloud)
         if camera_info is not None:
@@ -164,6 +178,7 @@ class EmpowerSemanticPlacementWrapper:
     def run(self) -> dict[str, Any]:
         """Run semantic placement using the previously set scene inputs."""
 
+        self._resolve_grasp_object_label()
         self._ensure_inputs_ready()
 
         scan_dir, dump_dir = stage_semantic_placement_inputs(
@@ -212,11 +227,18 @@ class EmpowerSemanticPlacementWrapper:
         voxel_size: float | None = None,
         marker_radius: float | None = None,
         show_window: bool | None = None,
+        include_markers: bool | None = None,
     ) -> list[Any]:
         """Print results and optionally save visualization/debug artifacts."""
 
         if self.semantic_placement_result is None:
             raise ValueError("No semantic placement result available. Call run() first.")
+
+        resolved_include_markers = (
+            is_semantic_placement_success(self.semantic_placement_result)
+            if include_markers is None
+            else bool(include_markers)
+        )
 
         print_semantic_placement_result(
             self.semantic_placement_result,
@@ -237,6 +259,7 @@ class EmpowerSemanticPlacementWrapper:
             show_window=self.default_show_window if show_window is None else bool(show_window),
             camera_extrinsics=self.camera_extrinsics,
             pointcloud_origin=self.pointcloud_origin,
+            include_markers=resolved_include_markers,
         )
 
     def _resolve_write_prefix(
@@ -253,8 +276,68 @@ class EmpowerSemanticPlacementWrapper:
             return self.dump_dir / prefix
         return prefix
 
+    def _resolve_grasp_object_label(self) -> str:
+        if self.grasp_object:
+            return self.grasp_object
+
+        if self.grasp_object_image is None:
+            raise ValueError(
+                "No grasp object label available. Provide grasp_object or grasp_object_image."
+            )
+
+        import numpy as np
+
+        grasp_image = np.asarray(self.grasp_object_image)
+        descriptions = self._get_object_descriptor().describe(
+            grasp_image,
+            detailed=True,
+            input_encoding="RGB",
+        )
+
+        if isinstance(descriptions, dict):
+            label = next(iter(descriptions.keys()), None) if descriptions else None
+        elif isinstance(descriptions, (list, tuple)) and descriptions:
+            label = descriptions[0]
+        else:
+            label = None
+
+        if label and str(label).strip():
+            self.grasp_object = str(label).strip()
+            print(f"Empower grasp object label: {self.grasp_object}")
+            return self.grasp_object
+
+        if self.grasp_object_fallback:
+            self.grasp_object = str(self.grasp_object_fallback).replace("_", " ").strip()
+            print(f"Empower grasp object label (fallback): {self.grasp_object}")
+            return self.grasp_object
+
+        raise ValueError(
+            "Unable to resolve grasp object label from grasp_object_image"
+        )
+
+    def _get_object_descriptor(self):
+        if self._object_descriptor is not None:
+            return self._object_descriptor
+
+        try:
+            from geo_sem_place import Chat, ObjectDescriptor
+            from geo_sem_place.llm.object_description import DEFAULT_MAX_NUM_WORDS
+        except ImportError as exc:
+            raise ImportError(
+                "geo_sem_place is required to resolve grasp object labels from images"
+            ) from exc
+
+        chat_ai = _geo_sem_place_chat_ai(self.ai)
+        object_llm = Chat(
+            ai=chat_ai,
+            type="object",
+            params={"num_descriptions": 1, "max_num_words": DEFAULT_MAX_NUM_WORDS},
+        )
+        self._object_descriptor = ObjectDescriptor(object_llm)
+        return self._object_descriptor
+
     def _ensure_inputs_ready(self) -> None:
-        if self.grasp_object is None:
+        if not self.grasp_object:
             raise ValueError("No grasp_object set. Call set_inputs(...) first.")
         if self.image is None:
             raise ValueError("No image set. Call set_inputs(...) first.")
@@ -395,6 +478,13 @@ def _canonical_llm_provider(ai: str) -> str:
     if provider in {"openrouter", "open_router"}:
         return "openrouter"
     raise ValueError("ai must be one of: chatgpt, mistral, openrouter")
+
+
+def _geo_sem_place_chat_ai(ai: str | None) -> str:
+    provider = _canonical_llm_provider(ai or "chatgpt")
+    if provider == "openrouter":
+        return "chatgpt"
+    return provider
 
 
 def _canonical_pointcloud_origin(pointcloud_origin: str) -> str:

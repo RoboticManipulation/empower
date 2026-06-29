@@ -441,6 +441,10 @@ def line(
     return segment
 
 
+REFERENCE_MARKER_COLOR = (0.55, 0.55, 0.55)
+REFERENCE_MARKER_COLOR_BGR = (128, 128, 128)
+
+
 def semantic_placement_geometries(
     *,
     pointcloud: o3d.geometry.PointCloud,
@@ -450,11 +454,20 @@ def semantic_placement_geometries(
     coordinate = as_point(result["coordinates"])
     surface = surface_from_result(result)
     reference = reference_from_result(result)
+    frame_size = marker_radius * 5.0
 
     geometries: list[o3d.geometry.Geometry] = [pointcloud]
     if reference is not None:
         reference_point, _ = reference
-        geometries.append(sphere(reference_point, marker_radius * 0.85, (0.0, 0.0, 0.0)))
+        geometries.append(
+            sphere(reference_point, marker_radius * 0.85, REFERENCE_MARKER_COLOR)
+        )
+        geometries.append(
+            o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=frame_size,
+                origin=reference_point,
+            )
+        )
     geometries.append(sphere(coordinate, marker_radius, (1.0, 0.05, 0.05)))
 
     if surface is not None and not np.allclose(coordinate, surface):
@@ -463,11 +476,107 @@ def semantic_placement_geometries(
 
     geometries.append(
         o3d.geometry.TriangleMesh.create_coordinate_frame(
-            size=marker_radius * 5.0,
+            size=frame_size,
             origin=coordinate,
         )
     )
     return geometries
+
+
+def _marker_to_pointcloud(
+    marker: o3d.geometry.Geometry,
+    *,
+    mesh_sample_count: int = 2000,
+    line_sample_count: int = 24,
+) -> o3d.geometry.PointCloud:
+    if isinstance(marker, o3d.geometry.PointCloud):
+        return marker
+
+    if isinstance(marker, o3d.geometry.TriangleMesh):
+        if marker.is_empty():
+            return o3d.geometry.PointCloud()
+        if len(marker.triangles) == 0:
+            pointcloud = o3d.geometry.PointCloud()
+            pointcloud.points = marker.vertices
+            if marker.has_vertex_colors():
+                pointcloud.colors = marker.vertex_colors
+            elif marker.has_vertex_normals():
+                pointcloud.paint_uniform_color((0.7, 0.7, 0.7))
+            return pointcloud
+        return marker.sample_points_uniformly(number_of_points=mesh_sample_count)
+
+    if isinstance(marker, o3d.geometry.LineSet):
+        points = np.asarray(marker.points, dtype=float)
+        lines = np.asarray(marker.lines, dtype=int)
+        if points.size == 0 or lines.size == 0:
+            return o3d.geometry.PointCloud()
+
+        line_colors = np.asarray(marker.colors, dtype=float)
+        if line_colors.size == 0:
+            line_colors = np.array([[1.0, 0.8, 0.05]], dtype=float)
+
+        sampled_points: list[np.ndarray] = []
+        sampled_colors: list[np.ndarray] = []
+        for line_idx, (start_idx, end_idx) in enumerate(lines):
+            segment = np.linspace(points[start_idx], points[end_idx], line_sample_count)
+            color = line_colors[min(line_idx, line_colors.shape[0] - 1)]
+            sampled_points.append(segment)
+            sampled_colors.append(np.tile(color, (segment.shape[0], 1)))
+
+        pointcloud = o3d.geometry.PointCloud()
+        pointcloud.points = o3d.utility.Vector3dVector(np.vstack(sampled_points))
+        pointcloud.colors = o3d.utility.Vector3dVector(np.vstack(sampled_colors))
+        return pointcloud
+
+    raise ValueError(f"Unsupported marker geometry type: {type(marker)}")
+
+
+def combine_debug_pointcloud(
+    pointcloud: o3d.geometry.PointCloud,
+    markers: Sequence[o3d.geometry.Geometry],
+    *,
+    mesh_sample_count: int = 2000,
+    line_sample_count: int = 24,
+) -> o3d.geometry.PointCloud:
+    """Merge the scene point cloud and marker geometries into one colored cloud."""
+
+    combined = o3d.geometry.PointCloud(pointcloud)
+    for marker in markers:
+        marker_cloud = _marker_to_pointcloud(
+            marker,
+            mesh_sample_count=mesh_sample_count,
+            line_sample_count=line_sample_count,
+        )
+        if not marker_cloud.is_empty():
+            combined += marker_cloud
+    return combined
+
+
+def write_scene_debug_files(
+    prefix: str | os.PathLike[str],
+    pointcloud: o3d.geometry.PointCloud,
+    *,
+    image: Image.Image | None = None,
+) -> None:
+    prefix_path = Path(prefix)
+    prefix_path.parent.mkdir(parents=True, exist_ok=True)
+
+    placement_path = prefix_path.with_name(prefix_path.name + "_placement_3d.ply")
+    if not o3d.io.write_point_cloud(str(placement_path), pointcloud):
+        raise ValueError(f"Unable to write placement point cloud: {placement_path}")
+    print(f"[OK] wrote {placement_path}")
+
+    if image is None:
+        return
+
+    import cv2
+
+    output_path = prefix_path.with_name(prefix_path.name + "_placement_2d.png")
+    rgb_image = np.asarray(image.convert("RGB"))
+    bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+    if not cv2.imwrite(str(output_path), bgr_image):
+        raise ValueError(f"Unable to write 2D scene image: {output_path}")
+    print(f"[OK] wrote {output_path}")
 
 
 def write_marker_files(
@@ -477,17 +586,11 @@ def write_marker_files(
 ) -> None:
     prefix_path = Path(prefix)
     prefix_path.parent.mkdir(parents=True, exist_ok=True)
-    scene_path = prefix_path.with_name(prefix_path.name + "_scene.ply")
-    o3d.io.write_point_cloud(str(scene_path), pointcloud)
-    print(f"[OK] wrote {scene_path}")
-
-    for idx, marker in enumerate(markers):
-        marker_path = prefix_path.with_name(prefix_path.name + f"_marker_{idx}.ply")
-        if isinstance(marker, o3d.geometry.TriangleMesh):
-            o3d.io.write_triangle_mesh(str(marker_path), marker)
-        elif isinstance(marker, o3d.geometry.LineSet):
-            o3d.io.write_line_set(str(marker_path), marker)
-        print(f"[OK] wrote {marker_path}")
+    combined = combine_debug_pointcloud(pointcloud, markers)
+    placement_path = prefix_path.with_name(prefix_path.name + "_placement_3d.ply")
+    if not o3d.io.write_point_cloud(str(placement_path), combined):
+        raise ValueError(f"Unable to write combined placement point cloud: {placement_path}")
+    print(f"[OK] wrote {placement_path}")
 
 
 def project_point_to_image(
@@ -621,7 +724,7 @@ def write_image_overlay(
             bgr_image,
             coordinate=reference_coordinate,
             intrinsics=intrinsics,
-            color=(0, 0, 0),
+            color=REFERENCE_MARKER_COLOR_BGR,
             label=reference_label or "reference",
             camera_extrinsics=camera_extrinsics,
             pointcloud_origin=pointcloud_origin,
@@ -666,11 +769,14 @@ def print_semantic_placement_result(
     grasp_object: str,
     frame_id: str,
 ) -> None:
-    coordinate = as_point(result["coordinates"])
     print(f"[OK] grasp object: {result.get('grasp_object', grasp_object)}")
     print(f"[OK] frame_id    : {result.get('frame_id', frame_id)}")
+    if result.get("success") is False:
+        print(f"[FAIL] reason    : {result.get('failure_reason', 'unknown failure')}")
+        return
     if "relation_offset_m" in result:
         print(f"[OK] offset_m    : {float(result['relation_offset_m']):.4f}")
+    coordinate = as_point(result["coordinates"])
     print(f"[OK] coordinate  : {fmt_point(coordinate)}")
 
 
@@ -688,34 +794,48 @@ def save_semantic_placement_outputs(
     window_name: str = "Empower Semantic Placement",
     camera_extrinsics: Mapping[str, Any] | None = None,
     pointcloud_origin: str = "camera",
+    include_markers: bool = True,
 ) -> list[o3d.geometry.Geometry]:
     pointcloud_obj = visualization_pointcloud(pointcloud, voxel_size)
-    geometries = semantic_placement_geometries(
-        pointcloud=pointcloud_obj,
-        result=result,
-        marker_radius=marker_radius,
-    )
-
-    reference = reference_from_result(result)
 
     if prefix is not None:
-        write_marker_files(prefix, pointcloud_obj, geometries[1:])
-        if camera_info is not None and image is not None:
-            write_image_overlay(
-                prefix,
-                image=image,
-                camera_info=camera_info,
-                coordinate=as_point(result["coordinates"]),
-                label=label,
-                camera_extrinsics=camera_extrinsics,
-                pointcloud_origin=pointcloud_origin,
-                reference_coordinate=reference[0] if reference is not None else None,
-                reference_label=reference[1] if reference is not None else None,
+        if include_markers:
+            geometries = semantic_placement_geometries(
+                pointcloud=pointcloud_obj,
+                result=result,
+                marker_radius=marker_radius,
             )
+            write_marker_files(prefix, pointcloud_obj, geometries[1:])
+            if camera_info is not None and image is not None:
+                reference = reference_from_result(result)
+                write_image_overlay(
+                    prefix,
+                    image=image,
+                    camera_info=camera_info,
+                    coordinate=as_point(result["coordinates"]),
+                    label=label,
+                    camera_extrinsics=camera_extrinsics,
+                    pointcloud_origin=pointcloud_origin,
+                    reference_coordinate=reference[0] if reference is not None else None,
+                    reference_label=reference[1] if reference is not None else None,
+                )
+            else:
+                print("[WARN] camera_info not provided; skipping 2D image overlay")
         else:
-            print("[WARN] camera_info not provided; skipping 2D image overlay")
+            write_scene_debug_files(prefix, pointcloud_obj, image=image)
+            geometries = [pointcloud_obj]
+    else:
+        geometries = (
+            [pointcloud_obj]
+            if not include_markers
+            else semantic_placement_geometries(
+                pointcloud=pointcloud_obj,
+                result=result,
+                marker_radius=marker_radius,
+            )
+        )
 
-    if show_window:
+    if show_window and include_markers:
         o3d.visualization.draw_geometries(geometries, window_name=window_name)
 
     return geometries
@@ -726,6 +846,7 @@ __all__ = [
     "ImageInput",
     "PointCloudInput",
     "as_point",
+    "combine_debug_pointcloud",
     "get_config",
     "get_config_dir_path",
     "get_root_dir_path",
@@ -754,6 +875,7 @@ __all__ = [
     "write_camera_info",
     "write_image_overlay",
     "write_marker_files",
+    "write_scene_debug_files",
     "write_pointcloud",
     "write_scan_image",
 ]

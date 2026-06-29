@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from utils.common_utils import save_json
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
+from semantic_placement_geometry import is_semantic_placement_success
 from semantic_placement_reference_geometry import get_semantic_reference_geometry
 from semantic_placement_reference_geometry import json_ready
 from semantic_placement_reference_geometry import load_pointcloud_points
@@ -71,7 +72,15 @@ def run_grounded_semantic_placement(
     save_json(result_path, json_ready(result))
 
     print(f"[OK] Semantic placement result -> {result_path}")
-    print(f"[OK] Semantic placement coordinates: {result['coordinates']}")
+    if is_semantic_placement_success(result):
+        print(f"[OK] Semantic placement coordinates: {result['coordinates']}")
+    else:
+        print(f"[FAIL] Semantic placement: {result.get('failure_reason', 'unknown failure')}")
+        if reference_positions:
+            print(
+                "[DEBUG] Reference centroids available for: "
+                f"{sorted(reference_positions)}"
+            )
     return result
 
 
@@ -145,6 +154,7 @@ def semantic_frame_id(loader_instance: Any) -> str:
 
 __all__ = [
     "get_semantic_grasp_object",
+    "is_semantic_placement_success",
     "run_grounded_semantic_placement",
     "semantic_frame_id",
     "semantic_placement_mode",

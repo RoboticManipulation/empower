@@ -11,7 +11,6 @@ from agents_langchain import Agents
 from semantic_placement_grounding import get_semantic_grasp_object
 from semantic_placement_grounding import run_grounded_semantic_placement
 from semantic_placement_prompts import semantic_placement_empower_task_description
-from semantic_placement_prompts import semantic_placement_prompt_objects
 from semantic_placement_prompts import semantic_placement_refined_task_description
 
 class Detection:
@@ -63,6 +62,7 @@ class Detection:
         # self.single_agent_info = agents.single_agent() 
 
         environment_agent_info, description_agent_info, planning_agent_info = agents.multi_agent_vision_planning()
+        print(f"Planning Agent: {planning_agent_info.strip()}")
 
         self.results_multi = {
             "environment_agent_info": environment_agent_info,
@@ -257,76 +257,96 @@ class Detection:
             descriptions[self.normalize_object_name(canonical_name)] = object_desc
         return descriptions
 
-    def get_detection_prompts(self, object_relations, planning_text):
-        prompts = []
-        prompt_to_canonical = {}
-        scene_objects = self.extract_scene_objects(object_relations)
-        object_descriptions = self.extract_object_descriptions(planning_text)
-        if self._semantic_refined_mode() is not None and self._semantic_mode() == self._semantic_refined_mode():
-            grasp_object = get_semantic_grasp_object(
-                self.loader_instance,
-                required=False,
-            )
-            scene_keys = {
-                self.normalize_object_name(object_name)
-                for object_name in scene_objects
-            }
-            for object_name in semantic_placement_prompt_objects(
-                planning_text=planning_text,
-                grasp_object=grasp_object,
-            ):
-                object_key = self.normalize_object_name(object_name)
-                if object_key and object_key not in scene_keys:
-                    scene_keys.add(object_key)
-                    scene_objects.append(object_name)
+    def build_open_vocab_prompts(self, object_relations, exclude_objects=None):
+        """Build unique open-vocabulary detector prompts from environment triples.
 
-        for object_name in scene_objects:
-            canonical_name = object_name.strip()
-            canonical_key = self.normalize_object_name(canonical_name)
-            aliases = [canonical_name]
-            object_desc = object_descriptions.get(canonical_key)
-
-            if object_desc:
-                aliases.append(object_desc)
-                if " of " in object_desc.lower():
-                    container, described_name = object_desc.split(" of ", 1)
-                    aliases.append(f"{described_name.strip()} {container.strip()}")
-
-            for alias in aliases:
-                alias = alias.strip()
-                if not alias:
-                    continue
-                alias_key = self.normalize_object_name(alias)
-                if alias_key in prompt_to_canonical:
-                    continue
-                prompts.append(alias)
-                prompt_to_canonical[alias_key] = canonical_name
-
-        if not prompts:
-            prompts = ["table"]
-            prompt_to_canonical[self.normalize_object_name("table")] = "table"
-
-        return prompts, prompt_to_canonical
-
-    def get_yoloworld_prompts(self, object_relations, planning_text):
-        return self.get_detection_prompts(object_relations, planning_text)
-
-    def get_classes(self,object_relations):
+        Matches original Empower main ``get_classes``: spaCy noun tokens are
+        joined into prompt strings and deduplicated with word2vec similarity.
+        """
         relation_list = []
+        excluded_word_lists = [
+            self.split_word(str(name))
+            for name in (exclude_objects or [])
+            if name and str(name).strip()
+        ]
 
         for relation in object_relations:
             parts = self.extract_relation_parts(relation)
             if not parts:
                 continue
-            relation_object_first, _, relation_object_second = parts
-            word_1 = self.split_word(relation_object_first)
-            word_2 = self.split_word(relation_object_second)
-            if not self.is_in_list(word_1,relation_list):
-                relation_list.append(word_1)
-            if not self.is_in_list(word_2,relation_list):
-                relation_list.append(word_2)
+            for obj_name in (parts[0], parts[2]):
+                if (
+                    self.is_support_object(obj_name)
+                    or self.is_action_label(obj_name)
+                    or self.is_structural_label(obj_name)
+                ):
+                    continue
+                word_list = self.split_word(obj_name)
+                if not word_list:
+                    continue
+                if self.is_in_list(word_list, excluded_word_lists):
+                    continue
+                if not self.is_in_list(word_list, relation_list):
+                    relation_list.append(word_list)
 
-        return self.list_to_prompt_string(relation_list)
+        prompts = []
+        prompt_to_canonical = {}
+        for word_list in relation_list:
+            prompt = " ".join(word_list).strip()
+            if not prompt:
+                continue
+            prompt_key = self.normalize_object_name(prompt)
+            if prompt_key in prompt_to_canonical:
+                continue
+            prompts.append(prompt)
+            prompt_to_canonical[prompt_key] = prompt
+
+        seen_full_names: set[str] = set()
+        for relation in object_relations:
+            parts = self.extract_relation_parts(relation)
+            if not parts:
+                continue
+            for obj_name in (parts[0], parts[2]):
+                if (
+                    self.is_support_object(obj_name)
+                    or self.is_action_label(obj_name)
+                    or self.is_structural_label(obj_name)
+                ):
+                    continue
+                word_list = self.split_word(obj_name)
+                if word_list and self.is_in_list(word_list, excluded_word_lists):
+                    continue
+                full_key = self.normalize_object_name(obj_name)
+                if not full_key or full_key in seen_full_names:
+                    continue
+                seen_full_names.add(full_key)
+                if full_key in prompt_to_canonical:
+                    continue
+                prompts.append(obj_name.strip())
+                prompt_to_canonical[full_key] = obj_name.strip()
+
+        return prompts, prompt_to_canonical
+
+    def get_detection_prompts(self, object_relations, planning_text):
+        exclude_objects = []
+        if self._semantic_mode() in self._semantic_placement_modes():
+            grasp_object = get_semantic_grasp_object(
+                self.loader_instance,
+                required=False,
+            )
+            if grasp_object:
+                exclude_objects.append(grasp_object)
+        return self.build_open_vocab_prompts(
+            object_relations,
+            exclude_objects=exclude_objects,
+        )
+
+    def get_yoloworld_prompts(self, object_relations, planning_text):
+        return self.get_detection_prompts(object_relations, planning_text)
+
+    def get_classes(self,object_relations):
+        prompts, _ = self.build_open_vocab_prompts(object_relations)
+        return ",".join(prompts)
 
     def show_mask(self,mask, random_color = True):
         if hasattr(mask, "detach"):
@@ -548,12 +568,11 @@ class Detection:
         )
         return backend, score_thr, detections
 
-    def find_bb_relation(self,relation_object):
+    def find_bb_relation(self, relation_object):
         index_ = []
-        target = self.normalize_object_name(relation_object)
         for index, detection in self.dict_detections.items():
-            label = self.normalize_object_name(detection['label'])
-            if label == target or label in target or target in label:
+            label = detection["label"]
+            if label and label.lower() in relation_object.lower():
                 index_.append(index)
         return index_
 
@@ -617,8 +636,12 @@ class Detection:
                         continue
                     min_distance_x_bb = abs(position_in_image_first[key_first]['x'] - position_in_image_second[key_second]['x'])//2
                     min_distance_y_bb = abs(position_in_image_first[key_first]['y'] - position_in_image_second[key_second]['y'])//2
-                    if min_distance_x_bb < min_distance_x and min_distance_x_bb != 0 and min_distance_y > min_distance_y_bb:
-                        
+                    if (
+                        min_distance_x_bb < min_distance_x
+                        and min_distance_x_bb != 0
+                        and min_distance_y > min_distance_y_bb
+                        and min_distance_y_bb != 0
+                    ):
                         index_first = key_first
                         index_second = key_second
                         min_distance_x = min_distance_x_bb

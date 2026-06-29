@@ -150,6 +150,10 @@ def _action_instructions_for_task(task_description: str) -> str:
     return _ACTION_INSTRUCTIONS
 
 
+def _is_semantic_placement_task(task_description: str) -> bool:
+    return "Use only one action line: DROP" in task_description
+
+
 _ROBOT_CONTEXT = (
     "You are a mobile robot with a base that allows you to move around the environment.\n"
     "You have a robotic arm with a gripper that allows you to pick up and place one object at a time.\n"
@@ -267,6 +271,13 @@ class Agents:
             "Each object name must be recognisable as a visual category.\n"
             f"{_RELATIONS_INSTRUCTIONS}"
         )
+        if _is_semantic_placement_task(self.task_description):
+            env_prompt += (
+                "\nFor semantic placement, list every visible movable object on the "
+                "placement surface using relation triples only. Never output action "
+                "lines such as DROP, GRAB, NAVIGATE, or GRAB/PLACE commands. "
+                "Do not name objects that are not visible in the image."
+            )
         environment_info = self._invoke_vision(env_prompt)
 
         # --- Stage 2: description agent ---
@@ -294,6 +305,13 @@ class Agents:
             f"The task is: {self.task_description}\n\n"
             f"{_action_instructions_for_task(self.task_description)}"
         )
+        if _is_semantic_placement_task(self.task_description):
+            user_prompt += (
+                "\nThe DROP reference object must be copied exactly from one object "
+                "name in these environment relations. Do not invent objects that are "
+                "not listed there:\n"
+                f"{environment_info}"
+            )
         plan = self._invoke_text(system_prompt, user_prompt)
 
         return environment_info, description_info, plan

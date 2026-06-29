@@ -10,6 +10,52 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 
+def reference_not_found_failure_reason(reference_object: str) -> str:
+    return f"Reference object not found: {reference_object}"
+
+
+def is_semantic_placement_success(result: Mapping[str, Any] | None) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("success") is False:
+        return False
+    if result.get("reference_object") and result.get("reference_position") is None:
+        return False
+    coordinates = result.get("coordinates")
+    if coordinates is None:
+        return False
+    try:
+        point = np.asarray(coordinates, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        return False
+    return point.shape == (3,) and np.isfinite(point).all()
+
+
+def _semantic_placement_failure(
+    *,
+    grasp_object: str,
+    frame_id: str,
+    failure_reason: str,
+    planning_source_line: str | None = None,
+    relation: str | None = None,
+    reference_object: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "success": False,
+        "failure_reason": failure_reason,
+        "grasp_object": grasp_object,
+        "normalized_grasp_object": _normalize_result_name(grasp_object),
+        "frame_id": frame_id,
+    }
+    if planning_source_line is not None:
+        result["planning_source_line"] = planning_source_line
+    if relation is not None:
+        result["relation"] = relation
+    if reference_object is not None:
+        result["reference_object"] = reference_object
+    return result
+
+
 def get_semantic_placement_coordinates_from_plan(
     planning_text: str,
     *,
@@ -45,28 +91,39 @@ def get_semantic_placement_coordinates_from_plan(
         shelf_board_heights=shelf_board_heights,
     )
 
-    if intent.reference_object and reference_positions_by_name:
-        reference_position = _resolve_reference_position(
-            intent.reference_object,
-            reference_positions_by_name,
+    if intent.reference_object:
+        matched_name, reference_position = resolve_reference_position_from_action(
+            intent.source_line,
+            reference_positions_by_name or {},
+            reference_object=intent.reference_object,
         )
-        if reference_position is not None:
-            result = _apply_reference_relation(
-                result,
-                reference_position=reference_position,
+        if reference_position is None:
+            return _semantic_placement_failure(
+                grasp_object=intent.grasp_object,
+                frame_id=frame_id,
+                failure_reason=reference_not_found_failure_reason(intent.reference_object),
+                planning_source_line=intent.source_line,
                 relation=intent.relation,
-                relation_offset_m=relation_offset_m,
-                shelf_board_heights=shelf_board_heights,
+                reference_object=intent.reference_object,
             )
-            result["planning_source_line"] = intent.source_line
-            result["relation"] = intent.relation
-            result["relation_offset_m"] = float(relation_offset_m)
-            result["reference_object"] = intent.reference_object
-            result["reference_position"] = {
-                "x": float(reference_position[0]),
-                "y": float(reference_position[1]),
-                "z": float(reference_position[2]),
-            }
+
+        result = _apply_reference_relation(
+            result,
+            reference_position=reference_position,
+            relation=intent.relation,
+            relation_offset_m=relation_offset_m,
+            shelf_board_heights=shelf_board_heights,
+        )
+        result["success"] = True
+        result["planning_source_line"] = intent.source_line
+        result["relation"] = intent.relation
+        result["relation_offset_m"] = float(relation_offset_m)
+        result["reference_object"] = matched_name or intent.reference_object
+        result["reference_position"] = {
+            "x": float(reference_position[0]),
+            "y": float(reference_position[1]),
+            "z": float(reference_position[2]),
+        }
 
     return result
 
@@ -148,6 +205,16 @@ def get_empower_style_semantic_coordinates(
         grasp_object=grasp_object,
     )
     if reference_position is None:
+        if reference_name or relation in {"left", "right", "on"}:
+            unresolved_reference = reference_name or "reference object"
+            return _semantic_placement_failure(
+                grasp_object=grasp_object,
+                frame_id=frame_id,
+                failure_reason=reference_not_found_failure_reason(unresolved_reference),
+                planning_source_line=action_line,
+                relation=relation,
+                reference_object=reference_name,
+            )
         result["planning_source_line"] = action_line
         result["relation"] = relation
         result["reference_object"] = reference_name
@@ -159,6 +226,7 @@ def get_empower_style_semantic_coordinates(
         relation_offset_m=relation_offset_m,
     )
     update_result_coordinate(result, coordinate)
+    result["success"] = True
     result["planning_source_line"] = action_line
     result["relation"] = relation
     result["relation_offset_m"] = float(relation_offset_m)
@@ -255,18 +323,12 @@ def resolve_empower_reference(
     reference_positions: Mapping[str, np.ndarray],
     grasp_object: str,
 ) -> tuple[str | None, np.ndarray | None]:
-    search_text = reference_search_text(action_line, relation, grasp_object)
-    candidates = matching_references(search_text, reference_positions)
-    if not candidates:
-        candidates = matching_references(action_line, reference_positions)
-    if not candidates:
-        return None, None
-
-    _, name, position = max(candidates, key=lambda item: item[0])
-    point = np.asarray(position, dtype=float)
-    if point.shape != (3,) or not np.isfinite(point).all():
-        return name, None
-    return name, point
+    search_text = reference_search_text(action_line, relation, grasp_object).strip()
+    return resolve_reference_position_from_action(
+        action_line,
+        reference_positions,
+        reference_object=search_text or None,
+    )
 
 
 def reference_search_text(
@@ -415,27 +477,90 @@ def _parse_relation_argument(
     return grasp_object, _clean_phrase(match.group("relation")), reference
 
 
-def _resolve_reference_position(
-    reference_object: str,
-    reference_positions_by_name: Mapping[str, Sequence[float]],
-) -> np.ndarray | None:
-    normalized_reference = _normalize_key(reference_object)
+def extract_labels_per_step(step: str) -> list[str]:
+    """Build n-gram labels from a plan step, matching original Empower main."""
+    tokens = step.strip().split()
+    if len(tokens) <= 1:
+        return []
+    return _token_ngrams(tokens[1:])
 
-    for name, position in reference_positions_by_name.items():
-        normalized_name = _normalize_key(name)
-        if normalized_name == normalized_reference:
-            point = np.asarray(position, dtype=float)
-            if point.shape == (3,) and np.isfinite(point).all():
-                return point
 
-    base_reference = _normalize_reference_key(reference_object)
-    for name, position in reference_positions_by_name.items():
-        normalized_name = _normalize_reference_key(name)
-        if normalized_name == base_reference:
-            point = np.asarray(position, dtype=float)
-            if point.shape == (3,) and np.isfinite(point).all():
-                return point
+def _token_ngrams(tokens: list[str]) -> list[str]:
+    if not tokens:
+        return []
+    labels = [tokens[0]]
+    for index in range(len(tokens) - 1):
+        labels.append(f"{tokens[index]} {tokens[index + 1]}")
+    labels.append(tokens[-1])
+    return labels
+
+
+def reference_names_match(relation_object: str, detection_label: str) -> bool:
+    """Match like original main ``find_bb_relation``: label substring of relation object."""
+    target = normalize_text_name(relation_object)
+    label = normalize_text_name(detection_label)
+    if not target or not label:
+        return False
+    return label in target
+
+
+def _reference_point(position: Sequence[float]) -> np.ndarray | None:
+    point = np.asarray(position, dtype=float)
+    if point.shape == (3,) and np.isfinite(point).all():
+        return point
     return None
+
+
+def _match_reference_labels(
+    labels: Sequence[str],
+    reference_positions_by_name: Mapping[str, Sequence[float]],
+) -> tuple[str | None, np.ndarray | None]:
+    """Resolve a reference centroid like original main DROP + relabeled detection keys."""
+    for label in labels:
+        for name, position in reference_positions_by_name.items():
+            if label == name:
+                point = _reference_point(position)
+                if point is not None:
+                    return name, point
+
+        candidates: list[tuple[int, str, np.ndarray]] = []
+        label_lower = label.lower()
+        for name, position in reference_positions_by_name.items():
+            if label_lower not in name.lower():
+                continue
+            point = _reference_point(position)
+            if point is None:
+                continue
+            candidates.append((len(name), name, point))
+
+        if candidates:
+            _, name, point = max(candidates, key=lambda item: (item[0], item[1]))
+            return name, point
+
+    return None, None
+
+
+def resolve_reference_position_from_action(
+    action_line: str,
+    reference_positions_by_name: Mapping[str, Sequence[float]],
+    *,
+    reference_object: str | None = None,
+) -> tuple[str | None, np.ndarray | None]:
+    """Resolve a reference centroid from relabeled detection keys and plan n-grams."""
+    if not reference_positions_by_name:
+        return None, None
+
+    label_groups: list[list[str]] = []
+    if reference_object and reference_object.strip():
+        label_groups.append(_token_ngrams(reference_object.strip().split()))
+    label_groups.append(extract_labels_per_step(action_line))
+
+    for labels in label_groups:
+        matched_name, point = _match_reference_labels(labels, reference_positions_by_name)
+        if point is not None:
+            return matched_name, point
+
+    return None, None
 
 
 def _apply_reference_relation(
@@ -812,16 +937,21 @@ def _normalize_reference_key(value: str) -> str:
 __all__ = [
     "SemanticPlacementIntent",
     "apply_relation_offset",
+    "extract_labels_per_step",
     "get_empower_style_semantic_coordinates",
     "get_semantic_placement_coordinates",
     "get_semantic_placement_coordinates_from_plan",
+    "is_semantic_placement_success",
     "last_empower_placement_action",
     "matching_references",
     "normalize_text_name",
     "parse_empower_relation",
     "parse_semantic_placement_plan",
+    "reference_names_match",
+    "reference_not_found_failure_reason",
     "reference_search_text",
     "resolve_empower_reference",
+    "resolve_reference_position_from_action",
     "strip_step_prefix",
     "update_result_coordinate",
 ]
