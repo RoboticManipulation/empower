@@ -192,6 +192,7 @@ class Agents:
         task_description: str,
         llm_provider: str | None = None,
         *,
+        llm_cfg: dict | None = None,
         environment_task_description: str | None = None,
     ):
         self.encoded_image = image
@@ -205,13 +206,17 @@ class Agents:
         master_cfg = get_config("llm_config")
         self.provider = _canonical_provider(llm_provider or master_cfg["llm_provider"])
 
-        llm_cfg_path = _ROOT / "configs" / "llm" / f"{self.provider}.yaml"
-        if not llm_cfg_path.exists():
-            raise FileNotFoundError(
-                f"LLM config not found: {llm_cfg_path}\n"
-                f"Expected a file named '{self.provider}.yaml' in configs/llm/."
-            )
-        llm_cfg = read_yaml(llm_cfg_path)
+        if llm_cfg is None:
+            llm_cfg_path = _ROOT / "configs" / "llm" / f"{self.provider}.yaml"
+            if not llm_cfg_path.exists():
+                raise FileNotFoundError(
+                    f"LLM config not found: {llm_cfg_path}\n"
+                    f"Expected a file named '{self.provider}.yaml' in configs/llm/."
+                )
+            llm_cfg = read_yaml(llm_cfg_path)
+        else:
+            llm_cfg = dict(llm_cfg)
+            llm_cfg.setdefault("vision_model", llm_cfg.get("model"))
 
         # Two LLM instances: one with vision for scene understanding, one text-only for planning.
         # For ChatGPT the same model handles both; for Mistral, Pixtral handles vision.

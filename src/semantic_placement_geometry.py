@@ -186,11 +186,13 @@ def get_empower_style_semantic_coordinates(
     reference_positions: Mapping[str, np.ndarray],
     frame_id: str,
     relation_offset_m: float,
+    shelf_board_heights: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     result = get_semantic_placement_coordinates(
         grasp_object,
         placement_pointclouds=placement_pointcloud,
         frame_id=frame_id,
+        shelf_board_heights=shelf_board_heights,
     )
 
     action_line = last_empower_placement_action(planning_text)
@@ -224,6 +226,7 @@ def get_empower_style_semantic_coordinates(
         reference_position,
         relation=relation,
         relation_offset_m=relation_offset_m,
+        shelf_board_heights=shelf_board_heights,
     )
     update_result_coordinate(result, coordinate)
     result["success"] = True

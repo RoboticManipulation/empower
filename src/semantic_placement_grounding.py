@@ -40,9 +40,9 @@ def run_grounded_semantic_placement(
     planning_text = results_multi.get("planning_agent_info", "")
     mode = semantic_placement_mode(loader_instance)
     relation_offset_m = semantic_relation_offset_m(loader_instance)
+    shelf_board_heights = semantic_shelf_board_heights(loader_instance)
 
     if mode == semantic_refined_mode(loader_instance):
-        shelf_board_heights = semantic_shelf_board_heights(loader_instance)
         result = get_semantic_placement_coordinates_from_plan(
             planning_text,
             placement_pointclouds=placement_pointcloud,
@@ -60,6 +60,7 @@ def run_grounded_semantic_placement(
             reference_positions=reference_positions,
             relation_offset_m=relation_offset_m,
             frame_id=semantic_frame_id(loader_instance),
+            shelf_board_heights=shelf_board_heights,
         )
 
     result["mode"] = mode

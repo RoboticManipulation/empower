@@ -56,6 +56,7 @@ class Detection:
             encoded_image,
             task_description,
             llm_provider=getattr(self.loader_instance, "llm_provider", None),
+            llm_cfg=getattr(self.loader_instance, "llm_cfg", None),
             environment_task_description=environment_task_description,
         )
         # self.single_agent_info = agents.single_agent() 

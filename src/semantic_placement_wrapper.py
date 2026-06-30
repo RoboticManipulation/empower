@@ -43,6 +43,7 @@ class EmpowerSemanticPlacementWrapper:
         simulation: bool | None = None,
         output_root: str | os.PathLike[str] | None = None,
         ai: str | None = None,
+        llm_cfg: Mapping[str, Any] | None = None,
         camera_info: CameraInfoInput = None,
         camera_extrinsics: CameraExtrinsicsInput = None,
     ) -> None:
@@ -81,6 +82,7 @@ class EmpowerSemanticPlacementWrapper:
         self.images_root: str | os.PathLike[str] | None = None
         self.output_root: str | os.PathLike[str] | None = output_root
         self.ai = _canonical_llm_provider(ai) if ai is not None else None
+        self.llm_cfg = _resolve_llm_cfg(ai=self.ai, llm_cfg=llm_cfg)
         self.grasp_object: str | None = None
         self.grasp_object_image = None
         self.grasp_object_fallback: str | None = None
@@ -209,10 +211,9 @@ class EmpowerSemanticPlacementWrapper:
             semantic_refined_mode=self.refined_mode,
             semantic_mode_config=self.mode_config,
             semantic_placement_config=self.config,
-            shelf_board_heights=(
-                self.shelf_board_heights if self.mode == self.refined_mode else None
-            ),
+            shelf_board_heights=self.shelf_board_heights,
             llm_provider=self.ai,
+            llm_cfg=self.llm_cfg,
             loader_instance=self.loader_instance,
         )
 
@@ -362,6 +363,7 @@ def _build_semantic_loader(
     semantic_placement_config: Mapping[str, Any],
     shelf_board_heights: tuple[float, ...] | None = None,
     llm_provider: str | None = None,
+    llm_cfg: Mapping[str, Any] | None = None,
     loader_instance: Any | None = None,
 ):
     _ensure_src_on_path()
@@ -385,6 +387,7 @@ def _build_semantic_loader(
     loader_instance.semantic_placement_config = dict(semantic_placement_config)
     loader_instance.semantic_shelf_board_heights = shelf_board_heights
     loader_instance.llm_provider = llm_provider
+    loader_instance.llm_cfg = dict(llm_cfg) if llm_cfg is not None else None
     return loader_instance
 
 
@@ -485,6 +488,29 @@ def _geo_sem_place_chat_ai(ai: str | None) -> str:
     if provider == "openrouter":
         return "chatgpt"
     return provider
+
+
+def _load_geo_sem_place_llm_cfg(ai: str) -> dict[str, Any]:
+    from geo_sem_place.utils.common_utils import get_config as get_geo_sem_place_config
+
+    provider = _geo_sem_place_chat_ai(ai)
+    cfg = dict(get_geo_sem_place_config(provider))
+    cfg["vision_model"] = cfg["model"]
+    return cfg
+
+
+def _resolve_llm_cfg(
+    *,
+    ai: str | None,
+    llm_cfg: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if llm_cfg is not None:
+        resolved = dict(llm_cfg)
+        resolved.setdefault("vision_model", resolved.get("model"))
+        return resolved
+    if ai is not None:
+        return _load_geo_sem_place_llm_cfg(ai)
+    return None
 
 
 def _canonical_pointcloud_origin(pointcloud_origin: str) -> str:

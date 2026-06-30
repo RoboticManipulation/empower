@@ -95,7 +95,7 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
         "pointcloud_exists": True,
         "camera_exists": True,
         "camera_info": {"fx": 1, "fy": 1, "cx": 0, "cy": 0},
-        "shelf_board_heights": None,
+        "shelf_board_heights": (0.72, 1.07),
         "grasp_file_text": "milk carton",
     }
 
