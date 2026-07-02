@@ -22,6 +22,7 @@ from utils.common_utils import load_pointcloud
 from utils.common_utils import print_semantic_placement_result
 from utils.common_utils import save_semantic_placement_outputs
 from utils.common_utils import stage_semantic_placement_inputs
+from semantic_placement_geometry import annotate_semantic_placement_context
 from semantic_placement_geometry import is_semantic_placement_success
 
 
@@ -219,6 +220,10 @@ class EmpowerSemanticPlacementWrapper:
 
         self.detection_instance.set_loader(loader_instance)
         self.semantic_placement_result = self.detection_instance.semantic_placement_result
+        annotate_semantic_placement_context(
+            self.semantic_placement_result,
+            shelf_board_heights=self.shelf_board_heights,
+        )
         return self.semantic_placement_result
 
     def save_outputs(

@@ -405,12 +405,13 @@ def update_result_coordinate(result: dict[str, Any], coordinate: np.ndarray) -> 
         "y": coordinates[1],
         "z": coordinates[2],
     }
-    result["pose"] = dict(result["pose"])
-    result["pose"]["position"] = {
-        "x": coordinates[0],
-        "y": coordinates[1],
-        "z": coordinates[2],
-    }
+    if "pose" in result:
+        result["pose"] = dict(result["pose"])
+        result["pose"]["position"] = {
+            "x": coordinates[0],
+            "y": coordinates[1],
+            "z": coordinates[2],
+        }
 
 
 def normalize_text_name(name: str | None) -> str:
@@ -937,8 +938,124 @@ def _normalize_reference_key(value: str) -> str:
     return re.sub(r"(?:_\d+)+$", "", normalized)
 
 
+def _xyz_from_result_value(value: Any) -> np.ndarray | None:
+    if isinstance(value, Mapping):
+        if not all(key in value for key in ("x", "y", "z")):
+            return None
+        value = [value["x"], value["y"], value["z"]]
+    try:
+        xyz = np.asarray(value, dtype=float).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if xyz.shape[0] != 3 or not np.isfinite(xyz).all():
+        return None
+    return xyz
+
+
+def _shelf_board_id_for_snapped_height(
+    height: float,
+    shelf_board_heights: Sequence[float] | None,
+) -> int | None:
+    heights = _coerce_optional_heights(shelf_board_heights, "shelf_board_heights")
+    if heights is None:
+        return None
+    return int(np.argmin(np.abs(heights - float(height))))
+
+
+def _normalize_placement_direction(relation: str | None) -> str | None:
+    relation = str(relation or "").strip().lower()
+    if relation in {"left", "left_of"}:
+        return "left"
+    if relation in {"right", "right_of"}:
+        return "right"
+    return None
+
+
+def _infer_placement_direction_from_offset(
+    target_xyz: np.ndarray,
+    reference_xyz: np.ndarray,
+    *,
+    axis: int = 0,
+    epsilon: float = 1e-6,
+) -> str | None:
+    delta = float(target_xyz[axis] - reference_xyz[axis])
+    if delta > epsilon:
+        return "right"
+    if delta < -epsilon:
+        return "left"
+    return None
+
+
+def _snap_xyz_to_shelf_board(
+    xyz: np.ndarray,
+    shelf_board_heights: Sequence[float] | None,
+) -> np.ndarray:
+    snapped = np.asarray(xyz, dtype=float).copy()
+    snapped[2] = _snap_height_to_nearest_board(float(xyz[2]), shelf_board_heights)
+    return snapped
+
+
+def _write_snapped_reference(result: dict[str, Any], reference_xyz: np.ndarray) -> None:
+    result["reference_coordinates"] = reference_xyz.tolist()
+    result["reference_position"] = {
+        "x": float(reference_xyz[0]),
+        "y": float(reference_xyz[1]),
+        "z": float(reference_xyz[2]),
+    }
+
+
+def annotate_semantic_placement_context(
+    result: dict[str, Any] | None,
+    *,
+    shelf_board_heights: Sequence[float] | None = None,
+) -> None:
+    """Add shelf-snapped coordinates and side-aware placement metadata."""
+
+    if not isinstance(result, dict):
+        return
+
+    shelf_heights = _coerce_optional_heights(shelf_board_heights, "shelf_board_heights")
+
+    target_xyz = _xyz_from_result_value(result.get("coordinates"))
+    reference_xyz = _xyz_from_result_value(result.get("reference_position"))
+    if reference_xyz is None:
+        reference_xyz = _xyz_from_result_value(result.get("reference_coordinates"))
+
+    if shelf_heights is not None:
+        if target_xyz is not None:
+            target_xyz = _snap_xyz_to_shelf_board(target_xyz, shelf_board_heights)
+            update_result_coordinate(result, target_xyz)
+        if reference_xyz is not None:
+            reference_xyz = _snap_xyz_to_shelf_board(reference_xyz, shelf_board_heights)
+            _write_snapped_reference(result, reference_xyz)
+
+    result["coordinate_origin"] = "object_bottom"
+
+    if target_xyz is not None:
+        shelf_board_id = _shelf_board_id_for_snapped_height(target_xyz[2], shelf_board_heights)
+        if shelf_board_id is not None:
+            result["shelf_board_id"] = shelf_board_id
+            result["shelf_id"] = f"shelf_{shelf_board_id}"
+
+    if reference_xyz is not None:
+        result["reference_coordinates"] = reference_xyz.tolist()
+        reference_shelf_board_id = _shelf_board_id_for_snapped_height(
+            reference_xyz[2],
+            shelf_board_heights,
+        )
+        if reference_shelf_board_id is not None:
+            result["reference_shelf_board_id"] = reference_shelf_board_id
+
+    placement_direction = _normalize_placement_direction(result.get("relation"))
+    if placement_direction is None and target_xyz is not None and reference_xyz is not None:
+        placement_direction = _infer_placement_direction_from_offset(target_xyz, reference_xyz)
+    if placement_direction is not None:
+        result["placement_direction"] = placement_direction
+
+
 __all__ = [
     "SemanticPlacementIntent",
+    "annotate_semantic_placement_context",
     "apply_relation_offset",
     "extract_labels_per_step",
     "get_empower_style_semantic_coordinates",

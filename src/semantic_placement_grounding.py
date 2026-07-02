@@ -6,6 +6,7 @@ import os
 from typing import Any, Mapping
 
 from utils.common_utils import save_json
+from semantic_placement_geometry import annotate_semantic_placement_context
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 from semantic_placement_geometry import is_semantic_placement_success
@@ -65,6 +66,7 @@ def run_grounded_semantic_placement(
 
     result["mode"] = mode
     result["relation_offset_m"] = relation_offset_m
+    annotate_semantic_placement_context(result, shelf_board_heights=shelf_board_heights)
 
     result_path = os.path.join(
         loader_instance.DUMP_DIR,
