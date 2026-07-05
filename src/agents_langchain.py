@@ -80,12 +80,17 @@ def _build_llm(provider: str, llm_cfg: dict, vision: bool = False):
 
     elif provider == "mistral":
         api_key = _resolve_api_key("MISTRAL_API_KEY")
-        return ChatMistralAI(
+        kwargs = dict(
             model=model_name,
             api_key=api_key,
             max_tokens=llm_cfg["max_tokens"],
             temperature=llm_cfg["temperature"],
         )
+        if "seed" in llm_cfg:
+            kwargs["seed"] = llm_cfg["seed"]
+        if llm_cfg.get("random_seed") is not None:
+            kwargs["random_seed"] = llm_cfg["random_seed"]
+        return ChatMistralAI(**kwargs)
 
     else:
         raise ValueError(

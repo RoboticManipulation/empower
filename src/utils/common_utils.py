@@ -18,6 +18,43 @@ PointCloudInput = str | os.PathLike[str] | o3d.geometry.PointCloud | np.ndarray
 CameraInfoInput = str | os.PathLike[str] | Mapping[str, Any] | Sequence[Sequence[float]] | np.ndarray | None
 CameraExtrinsicsInput = str | os.PathLike[str] | Mapping[str, Any] | np.ndarray | None
 
+
+def set_random_seeds(seed: int | None) -> None:
+    """Set seeds for Python, NumPy, PyTorch, and optional Empower training helpers."""
+    if seed is None:
+        return
+    import random
+
+    seed = int(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass
+
+    try:
+        from efficientvit.apps.setup import setup_seed
+
+        setup_seed(seed, resume=True)
+    except (ImportError, KeyError, RuntimeError):
+        pass
+
+
+def apply_seed_to_llm_cfg(config: Mapping[str, Any], seed: int) -> dict[str, Any]:
+    """Return a copy of an LLM config with the evaluation seed applied."""
+    resolved = dict(config)
+    seed = int(seed)
+    resolved["seed"] = seed
+    if resolved.get("random_seed") is None:
+        resolved["random_seed"] = seed
+    return resolved
+
+
 def read_json(path: str) -> dict:
     path = os.path.abspath(path)
     try:

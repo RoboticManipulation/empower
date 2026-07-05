@@ -47,8 +47,14 @@ class EmpowerSemanticPlacementWrapper:
         llm_cfg: Mapping[str, Any] | None = None,
         camera_info: CameraInfoInput = None,
         camera_extrinsics: CameraExtrinsicsInput = None,
+        seed: int | None = None,
     ) -> None:
         _ensure_src_on_path()
+        self.seed = int(seed) if seed is not None else None
+        if self.seed is not None:
+            from utils.common_utils import set_random_seeds
+
+            set_random_seeds(self.seed)
 
         self.config = _load_empower_config()
         self.mode_configs = _mode_config_mapping(self.config)
@@ -83,7 +89,7 @@ class EmpowerSemanticPlacementWrapper:
         self.images_root: str | os.PathLike[str] | None = None
         self.output_root: str | os.PathLike[str] | None = output_root
         self.ai = _canonical_llm_provider(ai) if ai is not None else None
-        self.llm_cfg = _resolve_llm_cfg(ai=self.ai, llm_cfg=llm_cfg)
+        self.llm_cfg = _resolve_llm_cfg(ai=self.ai, llm_cfg=llm_cfg, seed=self.seed)
         self.grasp_object: str | None = None
         self.grasp_object_image = None
         self.grasp_object_fallback: str | None = None
@@ -495,11 +501,11 @@ def _geo_sem_place_chat_ai(ai: str | None) -> str:
     return provider
 
 
-def _load_geo_sem_place_llm_cfg(ai: str) -> dict[str, Any]:
-    from geo_sem_place.utils.common_utils import get_config as get_geo_sem_place_config
+def _load_geo_sem_place_llm_cfg(ai: str, seed: int | None = None) -> dict[str, Any]:
+    from geo_sem_place.utils.common_utils import get_model_config
 
     provider = _geo_sem_place_chat_ai(ai)
-    cfg = dict(get_geo_sem_place_config(provider))
+    cfg = dict(get_model_config(provider, seed=seed))
     cfg["vision_model"] = cfg["model"]
     return cfg
 
@@ -508,14 +514,21 @@ def _resolve_llm_cfg(
     *,
     ai: str | None,
     llm_cfg: Mapping[str, Any] | None,
+    seed: int | None = None,
 ) -> dict[str, Any] | None:
     if llm_cfg is not None:
         resolved = dict(llm_cfg)
         resolved.setdefault("vision_model", resolved.get("model"))
-        return resolved
-    if ai is not None:
-        return _load_geo_sem_place_llm_cfg(ai)
-    return None
+    elif ai is not None:
+        resolved = _load_geo_sem_place_llm_cfg(ai, seed=seed)
+    else:
+        return None
+
+    if seed is not None:
+        from utils.common_utils import apply_seed_to_llm_cfg
+
+        resolved = apply_seed_to_llm_cfg(resolved, seed)
+    return resolved
 
 
 def _canonical_pointcloud_origin(pointcloud_origin: str) -> str:
