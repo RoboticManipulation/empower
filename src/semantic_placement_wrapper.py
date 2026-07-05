@@ -516,18 +516,20 @@ def _resolve_llm_cfg(
     llm_cfg: Mapping[str, Any] | None,
     seed: int | None = None,
 ) -> dict[str, Any] | None:
+    loaded_from_geo_sem_place = False
     if llm_cfg is not None:
         resolved = dict(llm_cfg)
         resolved.setdefault("vision_model", resolved.get("model"))
     elif ai is not None:
         resolved = _load_geo_sem_place_llm_cfg(ai, seed=seed)
+        loaded_from_geo_sem_place = True
     else:
         return None
 
-    if seed is not None:
+    if seed is not None and not loaded_from_geo_sem_place:
         from utils.common_utils import apply_seed_to_llm_cfg
 
-        resolved = apply_seed_to_llm_cfg(resolved, seed)
+        resolved = apply_seed_to_llm_cfg(resolved, seed, provider=ai)
     return resolved
 
 

@@ -45,10 +45,22 @@ def set_random_seeds(seed: int | None) -> None:
         pass
 
 
-def apply_seed_to_llm_cfg(config: Mapping[str, Any], seed: int) -> dict[str, Any]:
+def apply_seed_to_llm_cfg(
+    config: Mapping[str, Any],
+    seed: int,
+    *,
+    provider: str | None = None,
+) -> dict[str, Any]:
     """Return a copy of an LLM config with the evaluation seed applied."""
     resolved = dict(config)
     seed = int(seed)
+    normalized_provider = str(provider).strip().lower() if provider is not None else None
+    if normalized_provider == "mistral":
+        # Mistral API accepts random_seed, not seed (seed is rejected as extra input).
+        resolved.pop("seed", None)
+        resolved["random_seed"] = seed
+        return resolved
+
     resolved["seed"] = seed
     if resolved.get("random_seed") is None:
         resolved["random_seed"] = seed
