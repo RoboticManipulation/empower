@@ -16,6 +16,7 @@ from semantic_placement_prompts import semantic_placement_task_descriptions
 class Detection:
 
     def __init__(self):
+        self.segmentation_result = None
         task_description_order = "move the objects on the table to have the objects ordered by height from the highest to lowest"
         task_description_exit = "exit the room"
         task_description_diff = "throw away the objects in the corresponding recycling bin"
@@ -470,14 +471,23 @@ class Detection:
     def run_detector(self, image_path, image, prompt_labels, prompt_to_canonical):
         backend = self.detector_backend()
         if backend == "sam3":
-            score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.3"))
+            score_thr = float(os.environ.get("EMPOWER_SAM3_SCORE_THR", "0.5")) # 0.5 = SAM3 default
             segmentation = self.loader_instance.segmentation
             segmentation.processor.confidence_threshold = score_thr
             raw_results = segmentation.segment_img(
                 image_path,
                 prompt_labels,
+                save_img_path=os.path.join(
+                    self.loader_instance.DUMP_DIR,
+                    "place_rgb_wrist_-1_seg.png",
+                ),
+                save_text_path=os.path.join(
+                    self.loader_instance.DUMP_DIR,
+                    "place_rgb_wrist_-1_seg.json",
+                ),
                 remove_similar=False,
             )
+            self.segmentation_result = raw_results
 
             boxes, scores, class_ids, masks = [], [], [], []
             for class_id, prompt in enumerate(prompt_labels):

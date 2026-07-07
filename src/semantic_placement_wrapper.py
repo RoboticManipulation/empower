@@ -262,6 +262,7 @@ class EmpowerSemanticPlacementWrapper:
             grasp_object=self.grasp_object or "",
             frame_id=self.frame_id,
         )
+        self._save_place_segmentation_result()
         return save_semantic_placement_outputs(
             pointcloud=self.pointcloud,
             result=self.semantic_placement_result,
@@ -278,6 +279,25 @@ class EmpowerSemanticPlacementWrapper:
             pointcloud_origin=self.pointcloud_origin,
             include_markers=resolved_include_markers,
         )
+
+    def _save_place_segmentation_result(self) -> None:
+        if self.dump_dir is None:
+            return
+        if self.detector_backend != "sam3":
+            return
+
+        segmentation = getattr(self.loader_instance, "segmentation", None)
+        if segmentation is None:
+            print("[WARN] no SAM3 segmentation instance found; skipping place_rgb_wrist_-1_seg_result.npz")
+            return
+
+        segmentation_result = getattr(self.detection_instance, "segmentation_result", None)
+        if not segmentation_result:
+            print("[WARN] no SAM3 segmentation result found; skipping place_rgb_wrist_-1_seg_result.npz")
+            return
+
+        segmentation_result_path = Path(self.dump_dir) / "place_rgb_wrist_-1_seg_result.npz"
+        segmentation.save_segmentation(str(segmentation_result_path), segmentation_result)
 
     def _resolve_write_prefix(
         self,
