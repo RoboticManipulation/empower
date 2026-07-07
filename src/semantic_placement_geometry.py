@@ -327,11 +327,14 @@ def resolve_empower_reference(
     grasp_object: str,
 ) -> tuple[str | None, np.ndarray | None]:
     search_text = reference_search_text(action_line, relation, grasp_object).strip()
-    return resolve_reference_position_from_action(
+    matched_name, point = resolve_reference_position_from_action(
         action_line,
         reference_positions,
         reference_object=search_text or None,
     )
+    if point is None and search_text:
+        return search_text, None
+    return matched_name, point
 
 
 def reference_search_text(

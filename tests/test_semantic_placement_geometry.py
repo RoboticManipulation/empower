@@ -239,3 +239,15 @@ def test_resolve_empower_reference_uses_action_line_matching() -> None:
 
     assert matched_name == "seasoning bottle"
     assert point == pytest.approx(np.array([0.35, 0.7, 1.18]))
+
+
+def test_resolve_empower_reference_returns_requested_reference_when_missing() -> None:
+    matched_name, point = resolve_empower_reference(
+        action_line="DROP ketchup bottle left to cheez it cracker box",
+        relation="left",
+        reference_positions={},
+        grasp_object="ketchup bottle",
+    )
+
+    assert matched_name == "cheez it cracker box"
+    assert point is None
