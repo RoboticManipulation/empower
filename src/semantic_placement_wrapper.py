@@ -226,6 +226,11 @@ class EmpowerSemanticPlacementWrapper:
 
         self.detection_instance.set_loader(loader_instance)
         self.semantic_placement_result = self.detection_instance.semantic_placement_result
+        if isinstance(self.semantic_placement_result, dict):
+            results_multi = getattr(self.detection_instance, "results_multi", {})
+            empower_scene_graph = results_multi.get("environment_agent_info")
+            if empower_scene_graph is not None:
+                self.semantic_placement_result["empower_scene_graph"] = empower_scene_graph
         annotate_semantic_placement_context(
             self.semantic_placement_result,
             shelf_board_heights=self.shelf_board_heights,

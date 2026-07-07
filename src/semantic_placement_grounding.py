@@ -10,6 +10,7 @@ from semantic_placement_geometry import annotate_semantic_placement_context
 from semantic_placement_geometry import get_empower_style_semantic_coordinates
 from semantic_placement_geometry import get_semantic_placement_coordinates_from_plan
 from semantic_placement_geometry import is_semantic_placement_success
+from semantic_placement_reference_geometry import get_semantic_object_geometries
 from semantic_placement_reference_geometry import get_semantic_reference_geometry
 from semantic_placement_reference_geometry import json_ready
 from semantic_placement_reference_geometry import load_pointcloud_points
@@ -33,6 +34,11 @@ def run_grounded_semantic_placement(
 
     placement_pointcloud = load_pointcloud_points(pcd_path)
     reference_positions = get_semantic_reference_geometry(
+        loader_instance=loader_instance,
+        detections=detections,
+        placement_pointcloud=placement_pointcloud,
+    )
+    object_geometries = get_semantic_object_geometries(
         loader_instance=loader_instance,
         detections=detections,
         placement_pointcloud=placement_pointcloud,
@@ -66,6 +72,7 @@ def run_grounded_semantic_placement(
 
     result["mode"] = mode
     result["relation_offset_m"] = relation_offset_m
+    result["empower_object_geometries"] = object_geometries
     annotate_semantic_placement_context(result, shelf_board_heights=shelf_board_heights)
 
     result_path = os.path.join(

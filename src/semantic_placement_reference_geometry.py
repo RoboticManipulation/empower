@@ -280,22 +280,115 @@ def points_for_detection_mask(
     return points[hits]
 
 
-def summarize_object_points(object_points: np.ndarray) -> np.ndarray | None:
+def _filtered_object_points(object_points: np.ndarray) -> np.ndarray:
     object_points = np.asarray(object_points, dtype=float)
     object_points = object_points[np.isfinite(object_points).all(axis=1)]
     if len(object_points) == 0:
-        return None
+        return object_points
 
     median = np.median(object_points, axis=0)
     distances = np.linalg.norm(object_points - median, axis=1)
     if len(distances) > 10:
         cutoff = np.quantile(distances, 0.85)
         object_points = object_points[distances <= cutoff]
+    return object_points
 
+
+def summarize_object_points(object_points: np.ndarray) -> np.ndarray | None:
+    object_points = _filtered_object_points(object_points)
     if len(object_points) == 0:
         return None
 
     return np.mean(object_points, axis=0)
+
+
+def summarize_object_geometry(object_points: np.ndarray) -> dict[str, list[float]] | None:
+    object_points = _filtered_object_points(object_points)
+    if len(object_points) == 0:
+        return None
+
+    center = np.mean(object_points, axis=0)
+    extents = np.max(object_points, axis=0) - np.min(object_points, axis=0)
+    if not np.isfinite(center).all() or not np.isfinite(extents).all():
+        return None
+    if np.any(extents <= 0.0):
+        return None
+
+    return {
+        "center": center.tolist(),
+        "extents": extents.tolist(),
+    }
+
+
+def get_semantic_object_geometries(
+    *,
+    loader_instance: Any,
+    detections: Mapping[int, Mapping[str, Any]],
+    placement_pointcloud: np.ndarray,
+) -> dict[str, dict[str, Any]]:
+    image = cv2.imread(loader_instance.SCAN_DIR + "scan.jpg")
+    if image is None:
+        print("[WARN] Unable to read scan image; semantic object geometries disabled.")
+        return {}
+
+    intrinsics = load_camera_intrinsics(loader_instance)
+    if intrinsics is None:
+        print("[WARN] camera_info.json missing; semantic object geometries disabled.")
+        return {}
+
+    projection_points = projection_pointcloud_points(loader_instance, placement_pointcloud)
+    if projection_points is None:
+        return {}
+
+    projection = project_pointcloud_to_image(
+        projection_points,
+        intrinsics,
+        image.shape[:2],
+    )
+    if projection is None:
+        print("[WARN] Point cloud does not project into the image.")
+        return {}
+
+    object_geometries: dict[str, dict[str, Any]] = {}
+    object_quality: dict[str, tuple[float, int]] = {}
+    label_counts: dict[str, int] = {}
+    min_points = int(os.environ.get("EMPOWER_SEMANTIC_MIN_OBJECT_POINTS", "25"))
+
+    for detection in detections.values():
+        label = detection.get("label")
+        mask = detection.get("mask")
+        if not label or mask is None:
+            continue
+
+        object_points = points_for_detection_mask(
+            placement_pointcloud,
+            projection,
+            mask,
+        )
+        if len(object_points) < min_points:
+            continue
+
+        geometry = summarize_object_geometry(object_points)
+        if geometry is None:
+            continue
+
+        normalized_label = normalize_text_name(label)
+        label_counts[normalized_label] = label_counts.get(normalized_label, 0) + 1
+        occurrence = label_counts[normalized_label]
+
+        names = [label]
+        if occurrence > 1:
+            names.extend([f"{label} {occurrence}", f"{label}_{occurrence}"])
+
+        geometry = dict(geometry)
+        geometry["point_count"] = int(len(object_points))
+        quality = (float(detection.get("score", 0.0) or 0.0), int(len(object_points)))
+        for name in names:
+            if quality > object_quality.get(name, (-1.0, -1)):
+                object_geometries[name] = geometry
+                object_quality[name] = quality
+
+    return object_geometries
 
 
 def json_ready(value: Any) -> Any:
@@ -311,6 +404,7 @@ def json_ready(value: Any) -> Any:
 
 
 __all__ = [
+    "get_semantic_object_geometries",
     "get_semantic_reference_geometry",
     "json_ready",
     "load_camera_intrinsics",
