@@ -300,31 +300,6 @@ class Detection:
                 continue
             prompts.append(prompt)
             prompt_to_canonical[prompt_key] = prompt
-
-        seen_full_names: set[str] = set()
-        for relation in object_relations:
-            parts = self.extract_relation_parts(relation)
-            if not parts:
-                continue
-            for obj_name in (parts[0], parts[2]):
-                if (
-                    self.is_support_object(obj_name)
-                    or self.is_action_label(obj_name)
-                    or self.is_structural_label(obj_name)
-                ):
-                    continue
-                word_list = self.split_word(obj_name)
-                if word_list and self.is_in_list(word_list, excluded_word_lists):
-                    continue
-                full_key = self.normalize_object_name(obj_name)
-                if not full_key or full_key in seen_full_names:
-                    continue
-                seen_full_names.add(full_key)
-                if full_key in prompt_to_canonical:
-                    continue
-                prompts.append(obj_name.strip())
-                prompt_to_canonical[full_key] = obj_name.strip()
-
         return prompts, prompt_to_canonical
 
     def get_detection_prompts(self, object_relations, planning_text):
