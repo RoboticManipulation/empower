@@ -307,8 +307,10 @@ def summarize_object_geometry(object_points: np.ndarray) -> dict[str, list[float
     if len(object_points) == 0:
         return None
 
-    center = np.mean(object_points, axis=0)
-    extents = np.max(object_points, axis=0) - np.min(object_points, axis=0)
+    mn = np.min(object_points, axis=0)
+    mx = np.max(object_points, axis=0)
+    center = 0.5 * (mn + mx)
+    extents = mx - mn
     if not np.isfinite(center).all() or not np.isfinite(extents).all():
         return None
     if np.any(extents <= 0.0):
