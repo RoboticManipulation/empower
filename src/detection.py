@@ -15,8 +15,9 @@ from semantic_placement_prompts import semantic_placement_task_descriptions
 
 class Detection:
 
-    def __init__(self):
+    def __init__(self, false_detection_fallback=False):
         self.segmentation_result = None
+        self.false_detection_fallback = bool(false_detection_fallback)
         task_description_order = "move the objects on the table to have the objects ordered by height from the highest to lowest"
         task_description_exit = "exit the room"
         task_description_diff = "throw away the objects in the corresponding recycling bin"
@@ -258,12 +259,20 @@ class Detection:
             descriptions[self.normalize_object_name(canonical_name)] = object_desc
         return descriptions
 
-    def build_open_vocab_prompts(self, object_relations, exclude_objects=None):
+    def build_open_vocab_prompts(
+        self,
+        object_relations,
+        exclude_objects=None,
+        false_detection_fallback=None,
+    ):
         """Build unique open-vocabulary detector prompts from environment triples.
 
         Matches original Empower main ``get_classes``: spaCy noun tokens are
         joined into prompt strings and deduplicated with word2vec similarity.
         """
+        if false_detection_fallback is None:
+            false_detection_fallback = self.false_detection_fallback
+
         relation_list = []
         excluded_word_lists = [
             self.split_word(str(name))
@@ -301,9 +310,36 @@ class Detection:
                 continue
             prompts.append(prompt)
             prompt_to_canonical[prompt_key] = prompt
+
+        if false_detection_fallback:
+            seen_full_names: set[str] = set()
+            for relation in object_relations:
+                parts = self.extract_relation_parts(relation)
+                if not parts:
+                    continue
+                for obj_name in (parts[0], parts[2]):
+                    if (
+                        self.is_support_object(obj_name)
+                        or self.is_action_label(obj_name)
+                        or self.is_structural_label(obj_name)
+                    ):
+                        continue
+                    word_list = self.split_word(obj_name)
+                    if word_list and self.is_in_list(word_list, excluded_word_lists):
+                        continue
+                    full_key = self.normalize_object_name(obj_name)
+                    if not full_key or full_key in seen_full_names:
+                        continue
+                    seen_full_names.add(full_key)
+                    if full_key in prompt_to_canonical:
+                        continue
+                    prompt = obj_name.strip()
+                    prompts.append(prompt)
+                    prompt_to_canonical[full_key] = prompt
+
         return prompts, prompt_to_canonical
 
-    def get_detection_prompts(self, object_relations, planning_text):
+    def get_detection_prompts(self, object_relations, planning_text, false_detection_fallback=None):
         exclude_objects = []
         if self._semantic_mode() in self._semantic_placement_modes():
             grasp_object = get_semantic_grasp_object(
@@ -315,6 +351,7 @@ class Detection:
         return self.build_open_vocab_prompts(
             object_relations,
             exclude_objects=exclude_objects,
+            false_detection_fallback=false_detection_fallback,
         )
 
     def get_yoloworld_prompts(self, object_relations, planning_text):
