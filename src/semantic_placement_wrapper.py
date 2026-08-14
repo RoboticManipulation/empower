@@ -48,8 +48,10 @@ class EmpowerSemanticPlacementWrapper:
         camera_info: CameraInfoInput = None,
         camera_extrinsics: CameraExtrinsicsInput = None,
         seed: int | None = None,
+        debug=0,
     ) -> None:
         _ensure_src_on_path()
+        self.debug = debug
         self.seed = int(seed) if seed is not None else None
         if self.seed is not None:
             from utils.common_utils import set_random_seeds
@@ -297,7 +299,7 @@ class EmpowerSemanticPlacementWrapper:
             return
 
         segmentation_result_path = Path(self.dump_dir) / "place_rgb_wrist_-1_seg_result.npz"
-        segmentation.save_segmentation(str(segmentation_result_path), segmentation_result)
+        segmentation.save_segmentation(str(segmentation_result_path), segmentation_result, debug=self.debug)
 
     def _resolve_write_prefix(
         self,

@@ -5,7 +5,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
 
 from efficientvit.models.nn.act import build_act
 from efficientvit.models.nn.norm import build_norm
@@ -395,7 +394,7 @@ class LiteMLA(nn.Module):
             act_func=act_func[1],
         )
 
-    @autocast(enabled=False)
+    @torch.amp.autocast("cuda", enabled=False)
     def relu_linear_att(self, qkv: torch.Tensor) -> torch.Tensor:
         B, _, H, W = list(qkv.size())
 
