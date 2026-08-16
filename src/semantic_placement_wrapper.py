@@ -113,7 +113,7 @@ class EmpowerSemanticPlacementWrapper:
         import loader
         from detection import Detection
 
-        self.loader_instance = loader.Loader("semantic_placement")
+        self.loader_instance = loader.Loader("semantic_placement", seed=self.seed)
         if segmentation is not None:
             self.loader_instance.segmentation = segmentation
         self.detection_instance = Detection()
@@ -223,6 +223,7 @@ class EmpowerSemanticPlacementWrapper:
             shelf_board_heights=self.shelf_board_heights,
             llm_provider=self.ai,
             llm_cfg=self.llm_cfg,
+            seed=self.seed,
             loader_instance=self.loader_instance,
         )
 
@@ -403,13 +404,14 @@ def _build_semantic_loader(
     shelf_board_heights: tuple[float, ...] | None = None,
     llm_provider: str | None = None,
     llm_cfg: Mapping[str, Any] | None = None,
+    seed: int | None = None,
     loader_instance: Any | None = None,
 ):
     _ensure_src_on_path()
     if loader_instance is None:
         import loader
 
-        loader_instance = loader.Loader("semantic_placement")
+        loader_instance = loader.Loader("semantic_placement", seed=seed)
     loader_instance.task_name = "semantic_placement"
     loader_instance.SCAN_DIR = str(scan_dir) + os.sep
     loader_instance.DUMP_DIR = str(dump_dir) + os.sep

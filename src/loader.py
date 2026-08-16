@@ -11,15 +11,17 @@ from paths import *
 class Loader:
     _instance = None
 
-    def __new__(cls, *args):
+    def __new__(cls, use_case, seed=None):
         if not cls._instance:
             cls._instance = super(Loader, cls).__new__(cls)
-            cls._instance.initialize(*args)
+            cls._instance.initialize(use_case, seed=seed)
+        elif seed is not None:
+            cls._instance.seed = int(seed)
         return cls._instance
 
-    def initialize(self, *args):
-        use_case = args[0]
+    def initialize(self, use_case, seed=None):
         self._use_case = use_case
+        self.seed = int(seed) if seed is not None else None
 
         self._CONFIG = CONFIG_DIR
         self._IMAGES = IMAGES_DIR
@@ -83,7 +85,14 @@ class Loader:
             )
             segmentation_module = import_module("geo_sem_place.segmentation.segmentation")
             device = os.environ.get("EMPOWER_SAM3_DEVICE")
-            self._segmentation = segmentation_module.Segmentation(device=device)
+            if self.seed is None:
+                raise ValueError(
+                    "Empower requires a seed when lazily constructing Segmentation"
+                )
+            self._segmentation = segmentation_module.Segmentation(
+                seed=self.seed,
+                device=device,
+            )
         return self._segmentation
 
     @segmentation.setter

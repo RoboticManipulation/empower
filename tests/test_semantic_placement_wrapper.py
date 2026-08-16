@@ -11,6 +11,29 @@ import pytest
 from empower.semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
+def test_loader_lazy_segmentation_receives_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from empower import loader as loader_module
+
+    seen: dict[str, object] = {}
+
+    class FakeSegmentation:
+        def __init__(self, **kwargs) -> None:
+            seen.update(kwargs)
+
+    monkeypatch.setattr(
+        loader_module,
+        "import_module",
+        lambda _: types.SimpleNamespace(Segmentation=FakeSegmentation),
+    )
+
+    loader = object.__new__(loader_module.Loader)
+    loader._segmentation = None
+    loader.seed = 7
+
+    assert isinstance(loader.segmentation, FakeSegmentation)
+    assert seen["seed"] == 7
+
+
 def test_object_descriptor_receives_wrapper_seed(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
@@ -66,8 +89,9 @@ def test_run_semantic_placement_calls_high_level_wrapper_only(
     seen: dict[str, object] = {}
 
     class FakeLoader:
-        def __init__(self, task_name: str) -> None:
+        def __init__(self, task_name: str, seed: int | None = None) -> None:
             self.task_name = task_name
+            self.seed = seed
             self._segmentation = object()
 
         @property
@@ -155,8 +179,9 @@ def test_refined_mode_forwards_shelf_board_heights(
     seen: dict[str, object] = {}
 
     class FakeLoader:
-        def __init__(self, task_name: str) -> None:
+        def __init__(self, task_name: str, seed: int | None = None) -> None:
             self.task_name = task_name
+            self.seed = seed
             self._segmentation = object()
 
         @property
