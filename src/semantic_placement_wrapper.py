@@ -371,6 +371,7 @@ class EmpowerSemanticPlacementWrapper:
             ai=chat_ai,
             type="object",
             params={"num_descriptions": 1, "max_num_words": DEFAULT_MAX_NUM_WORDS},
+            seed=self.seed,
         )
         self._object_descriptor = ObjectDescriptor(object_llm)
         return self._object_descriptor

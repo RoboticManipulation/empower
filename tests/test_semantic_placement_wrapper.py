@@ -11,6 +11,39 @@ import pytest
 from empower.semantic_placement_wrapper import EmpowerSemanticPlacementWrapper
 
 
+def test_object_descriptor_receives_wrapper_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    class FakeChat:
+        def __init__(self, **kwargs) -> None:
+            seen.update(kwargs)
+
+    class FakeObjectDescriptor:
+        def __init__(self, llm) -> None:
+            self.llm = llm
+
+    monkeypatch.setitem(
+        sys.modules,
+        "geo_sem_place",
+        types.SimpleNamespace(Chat=FakeChat, ObjectDescriptor=FakeObjectDescriptor),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "geo_sem_place.llm.object_description",
+        types.SimpleNamespace(DEFAULT_MAX_NUM_WORDS=10),
+    )
+
+    wrapper = object.__new__(EmpowerSemanticPlacementWrapper)
+    wrapper._object_descriptor = None
+    wrapper.ai = "mistral"
+    wrapper.seed = 7
+
+    descriptor = wrapper._get_object_descriptor()
+
+    assert isinstance(descriptor, FakeObjectDescriptor)
+    assert seen["seed"] == 7
+
+
 def test_run_semantic_placement_calls_high_level_wrapper_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
