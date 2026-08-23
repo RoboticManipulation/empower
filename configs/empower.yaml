@@ -10,6 +10,8 @@ mode:
   original:
     relation_offset_m: 0.15
     detector_backend: "sam3"
+    false_detection_fallback: false
   refined:
     relation_offset_m: 0.15
     detector_backend: "sam3"
+    false_detection_fallback: true

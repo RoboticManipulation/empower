@@ -79,6 +79,10 @@ class EmpowerSemanticPlacementWrapper:
             self.mode_config,
             "relation_offset_m",
         )
+        self.false_detection_fallback = _required_bool(
+            self.mode_config,
+            "false_detection_fallback",
+        )
 
         visualization_config = _required_mapping(self.config, "visualization")
         self.default_voxel_size = _required_float(visualization_config, "voxel_size")
@@ -116,7 +120,9 @@ class EmpowerSemanticPlacementWrapper:
         self.loader_instance = loader.Loader("semantic_placement", seed=self.seed)
         if segmentation is not None:
             self.loader_instance.segmentation = segmentation
-        self.detection_instance = Detection()
+        self.detection_instance = Detection(
+            false_detection_fallback=self.false_detection_fallback,
+        )
         self.load_models()
 
     def load_models(self) -> None:
